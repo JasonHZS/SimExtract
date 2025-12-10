@@ -50,6 +50,7 @@ def print_results(results, max_display=3):
         doc_preview = documents[i][:200] + "..." if len(documents[i]) > 200 else documents[i]
         print(f"{doc_preview}")
 
+
     if total_docs > max_display:
         print(f"\n... and {total_docs - max_display} more documents")
 

@@ -38,14 +38,8 @@ class AttributionResult:
     text_a: str  # Source text (reference)
     text_b: str  # Target text (to be analyzed)
     method_name: str  # Attribution method used
-    overall_similarity: float  # Overall similarity score (0-1)
     spans: List[AttributionSpan]  # Attributed spans, sorted by score
     metadata: Dict[str, Any] = field(default_factory=dict)  # Additional info
-
-    def __post_init__(self):
-        """Validate result data."""
-        if not 0 <= self.overall_similarity <= 1:
-            raise ValueError("overall_similarity must be between 0 and 1")
 
     def top_k_spans(self, k: int = 5) -> List[AttributionSpan]:
         """Get top-k highest scoring spans.
@@ -61,27 +55,6 @@ class AttributionResult:
             key=lambda x: x.score,
             reverse=True
         )[:k]
-
-    def get_coverage(self, threshold: float = 0.5) -> float:
-        """Calculate percentage of text_b covered by high-scoring spans.
-
-        Args:
-            threshold: Minimum score for a span to be counted
-
-        Returns:
-            Coverage ratio (0-1)
-        """
-        if not self.text_b:
-            return 0.0
-
-        total_chars = len(self.text_b)
-        covered_chars = sum(
-            span.end_idx - span.start_idx
-            for span in self.spans
-            if span.score >= threshold
-        )
-
-        return min(covered_chars / total_chars, 1.0)
 
 
 class AttributionMethod(ABC):
