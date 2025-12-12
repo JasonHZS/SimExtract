@@ -45,11 +45,13 @@
             letter-spacing: 1.5px;
             font-weight: 600;
             color: #666;
+            margin-top: 30px;
             margin-bottom: 24px;
         }
 
         .cards-view h2 {
             text-align: center;
+            margin-bottom: 14px;
         }
 
         .source-text {
@@ -220,6 +222,9 @@
             border: 1px solid #EAEAEA;
             transition: all 0.2s ease;
             cursor: pointer; /* Clickable */
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
         }
 
         .attribution-card:hover {
@@ -250,6 +255,10 @@
             color: #F59E0B; /* Amber/Orange */
         }
 
+        .method-name.colbert {
+            color: #10B981; /* Emerald/Green for ColBERT */
+        }
+
         .span-text {
             font-size: 15px;
             line-height: 1.7;
@@ -264,6 +273,44 @@
             font-size: 11px;
             color: #999;
             font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .topic-keyword-pill {
+            color: #10B981;
+            font-weight: 700;
+        }
+
+        .topic-keyword-pill:not(:last-child)::after {
+            content: ", ";
+            color: #999;
+        }
+
+        .sparse-token-pill {
+            color: #6366F1;
+            font-weight: 700;
+        }
+
+        .sparse-token-pill:not(:last-child)::after {
+            content: ", ";
+            color: #999;
+        }
+
+        .topic-keywords.detail {
+            width: 100%;
+            max-width: 90%;
+            margin-top: 16px;
+            display: none;
+            text-align: right;
+            font-size: 11px;
+            font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+            color: #999;
+        }
+
+        .topic-keywords.detail.visible {
+            display: block;
         }
 
         /* Full text expansion */
@@ -503,6 +550,7 @@
                     <div class="detail-title" id="detail-title">Method Name</div>
                 </div>
                 <div class="target-text-full" id="detail-text"></div>
+                <div class="topic-keywords detail" id="detail-topic-keywords"></div>
             </div>
         </div>
     </div>
@@ -522,6 +570,7 @@
         const detailView = document.getElementById('detail-view');
         const detailTitle = document.getElementById('detail-title');
         const detailText = document.getElementById('detail-text');
+        const detailTopicKeywords = document.getElementById('detail-topic-keywords');
         const collectionSelect = document.getElementById('collection-select');
         const collectionCountEl = document.getElementById('collection-count');
 
@@ -604,6 +653,8 @@
 
                 const data = await response.json();
                 currentData = data; // Store data for detail view
+                currentData.topic_keywords = data.colbert_topic_keywords || [];
+                currentData.sparse_tokens = data.sparse_top_tokens || [];
                 renderResult(data);
 
             } catch (error) {
@@ -634,6 +685,7 @@
                 Similarity: ${similarityScore}% (distance: ${data.similarity_distance.toFixed(4)}) |
                 Length: ${data.target_text.length} chars
             `;
+            const topicKeywords = currentData.topic_keywords || [];
 
             // Render attribution cards
             if (data.spans.length === 0) {
@@ -647,21 +699,29 @@
 
             let cardsHTML = '';
 
-            // Sort: sparse first, then segmented
+            // Sort: sparse first, then colbert, then segmented
+            const methodOrder = { 'sparse': 0, 'colbert': 1, 'segmented': 2 };
             const sortedSpans = [...data.spans].sort((a, b) => {
-                if (a.method === 'sparse') return -1;
-                if (b.method === 'sparse') return 1;
-                return 0;
+                return (methodOrder[a.method] ?? 99) - (methodOrder[b.method] ?? 99);
             });
 
             // Store sorted spans back to data for index matching
             data.sortedSpans = sortedSpans;
 
+            const sparseTokens = currentData.sparse_tokens || [];
+
             for (let i = 0; i < sortedSpans.length; i++) {
                 const span = sortedSpans[i];
                 const methodLabel = span.method === 'sparse' 
                     ? 'Sparse (BGE-M3 Lexical)' 
+                    : span.method === 'colbert'
+                    ? 'ColBERT (Late Interaction)'
                     : 'Segmented (Fixed Length)';
+                
+                // Sparse 方法展示关键词
+                const keywordsInline = (span.method === 'sparse' && sparseTokens.length)
+                    ? `<span>${sparseTokens.map(t => `<span class="sparse-token-pill">${escapeHtml(t.token)}</span>`).join('')}</span>`
+                    : '';
                 
                 cardsHTML += `
                     <div class="attribution-card" onclick="showDetail(${i})">
@@ -670,8 +730,8 @@
                         </div>
                         <div class="span-text">${escapeHtml(span.text)}</div>
                         <div class="span-meta">
-                            Position: [${span.start_idx}:${span.end_idx}] | 
-                            Length: ${span.text.length} chars
+                            <span>Position: [${span.start_idx}:${span.end_idx}] | Length: ${span.text.length} chars</span>
+                            ${keywordsInline}
                         </div>
                     </div>
                 `;
@@ -687,6 +747,8 @@
             const targetText = currentData.target_text || "";
             const methodLabel = span.method === 'sparse' 
                     ? 'Sparse (BGE-M3 Lexical)' 
+                    : span.method === 'colbert'
+                    ? 'ColBERT (Late Interaction)'
                     : 'Segmented (Fixed Length)';
 
             // Build highlighted full text
@@ -704,8 +766,11 @@
 
             // Update detail view content
             detailTitle.textContent = methodLabel;
-            detailTitle.className = `detail-title ${span.method === 'sparse' ? 'method-name sparse' : 'method-name segmented'}`;
+            detailTitle.className = `detail-title method-name ${span.method}`;
             detailText.innerHTML = highlightedHTML;
+            // ColBERT 关键词展示暂时隐藏，后端抽取逻辑保留
+            detailTopicKeywords.innerHTML = '';
+            detailTopicKeywords.classList.remove('visible');
 
             // Transition
             cardsView.classList.add('hidden');
@@ -723,6 +788,18 @@
         function showCards() {
             cardsView.classList.remove('hidden');
             detailView.classList.remove('active');
+            detailTopicKeywords.classList.remove('visible');
+            detailTopicKeywords.innerHTML = '';
+        }
+
+        function buildTopicKeywordsContent(keywords) {
+            if (!keywords || !keywords.length) {
+                return '';
+            }
+            const keywordTexts = keywords.map(kw => 
+                `<span class="topic-keyword-pill">${escapeHtml(kw.text)}</span>`
+            ).join('');
+            return `Topic: ${keywordTexts}`;
         }
 
         function escapeHtml(text) {
@@ -747,6 +824,9 @@
                 }
                 if (!data.segmented_loaded) {
                     console.warn('Segmented attribution not loaded (TEI may not be running)');
+                }
+                if (!data.colbert_loaded) {
+                    console.warn('ColBERT attribution not loaded');
                 }
             } catch (error) {
                 console.error('Health check failed:', error);

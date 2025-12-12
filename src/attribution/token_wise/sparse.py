@@ -8,6 +8,7 @@ from threading import Lock
 from typing import Dict, Any, List, Optional, Tuple
 
 from ..base import AttributionMethod, AttributionResult, AttributionSpan
+from .utils import tokenize_with_positions, normalize_score
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,13 @@ _BGE_M3_MODEL_INIT_LOCK = Lock()
 
 
 @lru_cache(maxsize=8)
-def _get_cached_bge_m3_model(model_name: str, use_fp16: bool, device: Optional[str]):
+def _get_cached_bge_m3_model(
+    model_name: str,
+    use_fp16: bool,
+    device: Optional[str],
+    query_max_length: int = 512,
+    passage_max_length: int = 512
+):
     """Process-local singleton cache for BGEM3FlagModel.
 
     Important:
@@ -25,7 +32,11 @@ def _get_cached_bge_m3_model(model_name: str, use_fp16: bool, device: Optional[s
     """
     from FlagEmbedding import BGEM3FlagModel
 
-    kwargs = {"use_fp16": use_fp16}
+    kwargs = {
+        "use_fp16": use_fp16,
+        "query_max_length": query_max_length,
+        "passage_max_length": passage_max_length
+    }
     if device is not None:
         kwargs["device"] = device
 
@@ -72,9 +83,12 @@ class SparseAttribution(AttributionMethod):
         self.model_name = config.get("model_name", "BAAI/bge-m3")
         self.use_fp16 = config.get("use_fp16", True)
         self.device = config.get("device", None)
+        self.query_max_length = config.get("query_max_length", 1024)
+        self.passage_max_length = config.get("passage_max_length", 1024)
         self.window_size = config.get("window_size", 50)
         self.window_overlap = config.get("window_overlap", 40)
         self.top_k_spans = config.get("top_k_spans", 3)
+        self.top_k_tokens = config.get("top_k_tokens", 5)
 
         # Validate window parameters
         if self.window_size <= 0:
@@ -105,7 +119,13 @@ class SparseAttribution(AttributionMethod):
 
             # NOTE: model instances are cached per-process to avoid repeated loads
             # when SparseAttribution is constructed multiple times (e.g., in a web service).
-            self._model = _get_cached_bge_m3_model(self.model_name, self.use_fp16, self.device)
+            self._model = _get_cached_bge_m3_model(
+                self.model_name,
+                self.use_fp16,
+                self.device,
+                query_max_length=self.query_max_length,
+                passage_max_length=self.passage_max_length
+            )
             logger.info(f"BGE-M3 model loaded: {self.model_name}")
 
         except ImportError as e:
@@ -263,31 +283,7 @@ class SparseAttribution(AttributionMethod):
                 - start: int, character start position
                 - end: int, character end position
         """
-        # Encode with offset mapping
-        encoding = self.tokenizer(
-            text,
-            return_offsets_mapping=True,
-            add_special_tokens=False
-        )
-
-        tokens = []
-        for idx, (token_id, (start, end)) in enumerate(
-            zip(encoding['input_ids'], encoding['offset_mapping'])
-        ):
-            # Skip special tokens or empty spans
-            if start == end:
-                continue
-
-            token_str = self.tokenizer.decode([token_id])
-            tokens.append({
-                "token_id": token_id,
-                "token": token_str,
-                "start": start,
-                "end": end,
-                "index": idx
-            })
-
-        return tokens
+        return tokenize_with_positions(self.tokenizer, text)
 
     def _compute_window_scores(
         self,
@@ -384,10 +380,7 @@ class SparseAttribution(AttributionMethod):
         Returns:
             Normalized score in [0, 1]
         """
-        if max_score <= 0:
-            return 0.0
-        normalized = score / max_score
-        return max(0.0, min(1.0, normalized))
+        return normalize_score(score, max_score)
 
     def extract(self, text_a: str, text_b: str) -> AttributionResult:
         """Extract attribution spans from text_b based on similarity to text_a.

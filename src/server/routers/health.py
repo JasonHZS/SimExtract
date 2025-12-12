@@ -8,7 +8,8 @@ from src.server.schemas import HealthResponse, CollectionsResponse, CollectionIn
 from src.server.dependencies import (
     get_chroma_store,
     get_sparse_attribution,
-    get_segmented_attribution
+    get_segmented_attribution,
+    get_colbert_attribution
 )
 from src.data_pipeline.stores.chroma_store import ChromaStore
 
@@ -68,9 +69,18 @@ async def health_check(
     except Exception:
         pass
     
+    colbert_loaded = False
+    try:
+        from src.server.dependencies import get_colbert_attribution
+        colbert = get_colbert_attribution()
+        colbert_loaded = colbert._model is not None
+    except Exception:
+        pass
+    
     return HealthResponse(
         status="ok",
         sparse_loaded=sparse_loaded,
         segmented_loaded=segmented_loaded,
+        colbert_loaded=colbert_loaded,
         total_collections=total_collections,
     )

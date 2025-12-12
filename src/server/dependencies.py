@@ -6,7 +6,7 @@ from typing import Optional
 
 from src.data_pipeline.stores.chroma_store import ChromaStore
 from src.attribution.segmented import SegmentedAttribution
-from src.attribution.token_wise import SparseAttribution
+from src.attribution.token_wise import SparseAttribution, ColBERTAttribution
 from src.server.config import CHROMA_DB_PATH, load_config
 
 logger = logging.getLogger(__name__)
@@ -43,3 +43,15 @@ def get_segmented_attribution() -> Optional[SegmentedAttribution]:
         logger.warning(f"SegmentedAttribution initialization failed: {e}")
         logger.warning("TEI vectorizer may not be running. Segmented method will be unavailable.")
         return None
+
+
+@lru_cache(maxsize=1)
+def get_colbert_attribution() -> ColBERTAttribution:
+    """Get or create ColBERTAttribution singleton (uses BGE-M3 model).
+    
+    ColBERT uses the same BGE-M3 model as Sparse, but leverages multi-vector
+    late interaction for span extraction.
+    """
+    config = load_config().get("colbert", {})
+    logger.info("Initializing ColBERTAttribution (BGE-M3 ColBERT vectors)...")
+    return ColBERTAttribution(config)

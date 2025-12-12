@@ -220,6 +220,59 @@ class ChromaStore(BaseStore):
             logger.error(f"Failed to delete collection '{name}': {e}")
             return False
 
+    def clear_collection(self, name: str) -> Dict[str, Any]:
+        """Clear all documents from a collection by deleting and recreating it.
+
+        This is useful when you want to reimport data with different filters
+        or completely refresh the collection.
+
+        Args:
+            name: Collection name to clear
+
+        Returns:
+            Dictionary with operation results:
+                - "success": Whether the operation succeeded
+                - "previous_count": Number of documents before clearing (0 if not found)
+                - "message": Description of what happened
+        """
+        result = {
+            "success": False,
+            "previous_count": 0,
+            "message": ""
+        }
+
+        try:
+            # Check if collection exists and get count
+            existing = self.get_collection(name)
+            if existing:
+                result["previous_count"] = existing.count()
+                logger.info(
+                    f"Clearing collection '{name}' "
+                    f"(current count: {result['previous_count']})"
+                )
+
+                # Delete the collection
+                if not self.delete_collection(name):
+                    result["message"] = f"Failed to delete collection '{name}'"
+                    return result
+
+                result["success"] = True
+                result["message"] = (
+                    f"Cleared collection '{name}', "
+                    f"removed {result['previous_count']} documents"
+                )
+            else:
+                result["success"] = True
+                result["message"] = f"Collection '{name}' does not exist, nothing to clear"
+
+            logger.info(result["message"])
+            return result
+
+        except Exception as e:
+            result["message"] = f"Error clearing collection '{name}': {e}"
+            logger.error(result["message"])
+            return result
+
     def query_collection(
         self,
         collection: Collection,

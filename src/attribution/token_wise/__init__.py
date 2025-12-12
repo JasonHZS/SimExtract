@@ -5,7 +5,7 @@ which tokens in text_b contribute most to its similarity with text_a.
 
 Available methods:
 - SparseAttribution: Uses BGE-M3 lexical weights for sparse token matching
-- ColBERTAttribution: Uses ColBERT late interaction (skeleton, not yet implemented)
+- ColBERTAttribution: Uses ColBERT-style late interaction with MaxSim scoring
 """
 
 from .sparse import SparseAttribution

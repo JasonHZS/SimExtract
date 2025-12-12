@@ -69,14 +69,28 @@ class BatchProcessor:
             "total_rows": 0,
             "processed": 0,
             "skipped_empty": 0,
+            "skipped_too_short": 0,
             "added": 0,
             "failed": 0,
+            "cleared_count": 0,
             "start_time": time.time(),
             "end_time": None,
             "duration": None
         }
 
         try:
+            # Clear collection if configured
+            clear_before_import = getattr(
+                self.config.processing, 'clear_before_import', False
+            )
+            if clear_before_import:
+                clear_result = self.chroma_client.clear_collection(collection_name)
+                if clear_result["success"]:
+                    stats["cleared_count"] = clear_result["previous_count"]
+                    logger.info(clear_result["message"])
+                else:
+                    logger.warning(clear_result["message"])
+
             # Get or create collection
             collection = self.chroma_client.get_or_create_collection(
                 name=collection_name,
@@ -101,9 +115,12 @@ class BatchProcessor:
                     # Prepare documents
                     documents, metadatas, ids = self.reader.prepare_documents(chunk)
 
-                    # Track skipped records
-                    skipped = len(chunk) - len(documents)
-                    stats["skipped_empty"] += skipped
+                    # Track skipped records (including too short ones)
+                    skipped_too_short = getattr(self.reader, 'skipped_too_short', 0)
+                    stats["skipped_too_short"] += skipped_too_short
+                    # skipped_empty = total skipped - too_short
+                    skipped_empty = len(chunk) - len(documents) - skipped_too_short
+                    stats["skipped_empty"] += skipped_empty
 
                     if documents:
                         # Add to ChromaDB
@@ -131,6 +148,7 @@ class BatchProcessor:
                 f"{stats['processed']} processed, "
                 f"{stats['added']} added, "
                 f"{stats['skipped_empty']} skipped (empty), "
+                f"{stats['skipped_too_short']} skipped (too short), "
                 f"{stats['failed']} failed, "
                 f"duration: {stats['duration']:.2f}s"
             )
@@ -167,6 +185,8 @@ class BatchProcessor:
             "total_rows": 0,
             "total_processed": 0,
             "total_skipped_empty": 0,
+            "total_skipped_too_short": 0,
+            "total_cleared": 0,
             "total_added": 0,
             "total_failed": 0,
             "start_time": time.time(),
@@ -197,6 +217,8 @@ class BatchProcessor:
             all_stats["total_rows"] += file_stats["total_rows"]
             all_stats["total_processed"] += file_stats["processed"]
             all_stats["total_skipped_empty"] += file_stats["skipped_empty"]
+            all_stats["total_skipped_too_short"] += file_stats.get("skipped_too_short", 0)
+            all_stats["total_cleared"] += file_stats.get("cleared_count", 0)
             all_stats["total_added"] += file_stats["added"]
             all_stats["total_failed"] += file_stats["failed"]
 
@@ -209,6 +231,7 @@ class BatchProcessor:
             f"{all_stats['total_processed']} processed, "
             f"{all_stats['total_added']} added, "
             f"{all_stats['total_skipped_empty']} skipped (empty), "
+            f"{all_stats['total_skipped_too_short']} skipped (too short), "
             f"{all_stats['total_failed']} failed, "
             f"total duration: {all_stats['total_duration']:.2f}s"
         )
@@ -232,6 +255,9 @@ def print_summary(stats: Dict[str, Any]) -> None:
     print(f"Total Rows: {stats['total_rows']:,}")
     print(f"Successfully Stored: {stats['total_added']:,}")
     print(f"Skipped (empty content): {stats['total_skipped_empty']:,}")
+    print(f"Skipped (too short): {stats.get('total_skipped_too_short', 0):,}")
+    if stats.get('total_cleared', 0) > 0:
+        print(f"Cleared (before import): {stats['total_cleared']:,}")
     print(f"Failed: {stats['total_failed']:,}")
 
     # Duration
@@ -248,11 +274,16 @@ def print_summary(stats: Dict[str, Any]) -> None:
         collection = file_stats['collection']
         processed = file_stats['processed']
         added = file_stats['added']
-        skipped = file_stats['skipped_empty']
+        skipped_empty = file_stats['skipped_empty']
+        skipped_short = file_stats.get('skipped_too_short', 0)
+        cleared = file_stats.get('cleared_count', 0)
         duration = file_stats['duration']
 
         print(f"\n  {file_name} → {collection}")
-        print(f"    Processed: {processed:,} | Added: {added:,} | Skipped: {skipped:,}")
+        print(f"    Processed: {processed:,} | Added: {added:,}")
+        print(f"    Skipped (empty): {skipped_empty:,} | Skipped (short): {skipped_short:,}")
+        if cleared > 0:
+            print(f"    Cleared: {cleared:,}")
         print(f"    Duration: {duration:.1f}s")
 
         if "error" in file_stats:

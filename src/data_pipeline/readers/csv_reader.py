@@ -18,12 +18,14 @@ class CSVReader(BaseReader):
     - Memory-efficient chunked reading
     - Flexible field extraction
     - Empty content filtering
+    - Minimum content length filtering
     - Type conversion utilities
     """
 
     def __init__(
         self,
         skip_empty_content: bool = True,
+        min_content_length: int = 0,
         content_field: str = "content",
         id_field: str = "id",
         metadata_fields: List[str] = None
@@ -32,16 +34,20 @@ class CSVReader(BaseReader):
 
         Args:
             skip_empty_content: Whether to skip rows with empty content
+            min_content_length: Minimum character length for content (0 = no filter)
             content_field: Name of the column containing document text
             id_field: Name of the column containing document IDs
             metadata_fields: List of metadata field names to extract
         """
         self.skip_empty_content = skip_empty_content
+        self.min_content_length = min_content_length
         self.content_field = content_field
         self.id_field = id_field
         self.metadata_fields = metadata_fields or [
             "author", "date", "is_digest", "title"
         ]
+        # 统计：跳过的短文本数量（每次 prepare_documents 调用后更新）
+        self.skipped_too_short = 0
 
     def read_in_chunks(
         self,
@@ -105,6 +111,8 @@ class CSVReader(BaseReader):
         documents = []
         metadatas = []
         ids = []
+        # 重置短文本计数器
+        self.skipped_too_short = 0
 
         for idx, row in df.iterrows():
             content = row.get(self.content_field, '')
@@ -114,6 +122,18 @@ class CSVReader(BaseReader):
                 if pd.isna(content) or not str(content).strip():
                     logger.debug(f"Skipping row {idx}: empty content")
                     continue
+
+            # Convert to string and strip
+            content_str = str(content).strip()
+
+            # Skip content shorter than minimum length
+            if self.min_content_length > 0 and len(content_str) < self.min_content_length:
+                logger.debug(
+                    f"Skipping row {idx}: content too short "
+                    f"({len(content_str)} < {self.min_content_length})"
+                )
+                self.skipped_too_short += 1
+                continue
 
             # Extract metadata
             metadata = {}
@@ -126,13 +146,14 @@ class CSVReader(BaseReader):
                         metadata[field] = self._safe_str(value)
 
             # Prepare document data
-            documents.append(str(content).strip())
+            documents.append(content_str)
             metadatas.append(metadata)
             ids.append(str(row.get(self.id_field, f"row_{idx}")))
 
         logger.debug(
             f"Prepared {len(documents)} documents "
-            f"(skipped {len(df) - len(documents)})"
+            f"(skipped {len(df) - len(documents)}, "
+            f"too short: {self.skipped_too_short})"
         )
 
         return documents, metadatas, ids

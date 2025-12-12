@@ -7,13 +7,14 @@ from fastapi import APIRouter, HTTPException, Depends
 from src.data_pipeline.samplers import RandomQuerySampler
 from src.data_pipeline.stores.chroma_store import ChromaStore
 from src.attribution.segmented import SegmentedAttribution
-from src.attribution.token_wise import SparseAttribution
+from src.attribution.token_wise import SparseAttribution, ColBERTAttribution
 
-from src.server.schemas import AnalysisRequest, AnalysisResult, SpanInfo
+from src.server.schemas import AnalysisRequest, AnalysisResult, SpanInfo, KeywordInfo, SparseTokenInfo
 from src.server.dependencies import (
     get_chroma_store,
     get_sparse_attribution,
-    get_segmented_attribution
+    get_segmented_attribution,
+    get_colbert_attribution
 )
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ async def analyze_random(
     store: ChromaStore = Depends(get_chroma_store),
     sparse: SparseAttribution = Depends(get_sparse_attribution),
     segmented: Optional[SegmentedAttribution] = Depends(get_segmented_attribution),
+    colbert: ColBERTAttribution = Depends(get_colbert_attribution),
 ):
     """Randomly sample a document pair and run attribution analysis.
     
@@ -84,6 +86,8 @@ async def analyze_random(
     
     # Run attribution methods
     spans: List[SpanInfo] = []
+    colbert_keywords: List[KeywordInfo] = []
+    sparse_tokens: List[SparseTokenInfo] = []
     
     # 1. Sparse Attribution (always available since BGE-M3 is local)
     try:
@@ -97,6 +101,19 @@ async def analyze_random(
                 score=top_span.score,
                 method="sparse",
             ))
+        # Extract top contributing tokens for display (filter tokens < 2 chars)
+        top_tokens = sparse_result.metadata.get("top_contributing_tokens", [])
+        if top_tokens:
+            filtered_tokens = [t for t in top_tokens if len(t.get("token", "")) >= 2]
+            top_k = sparse.top_k_tokens  # 从配置读取关键词数量
+            sparse_tokens = [
+                SparseTokenInfo(
+                    token=t.get("token", ""),
+                    score=t.get("score", 0.0),
+                    normalized_score=t.get("normalized_score", 0.0),
+                )
+                for t in filtered_tokens[:top_k]
+            ]
     except Exception as e:
         logger.error(f"Sparse attribution failed: {e}")
     
@@ -116,6 +133,32 @@ async def analyze_random(
     except Exception as e:
         logger.warning(f"Segmented attribution failed: {e}")
     
+    # 3. ColBERT Attribution (uses BGE-M3 multi-vector late interaction)
+    try:
+        colbert_result = colbert.extract(source_text, target_text)
+        if colbert_result.spans:
+            top_span = colbert_result.spans[0]
+            spans.append(SpanInfo(
+                text=top_span.text,
+                start_idx=top_span.start_idx,
+                end_idx=top_span.end_idx,
+                score=top_span.score,
+                method="colbert",
+            ))
+        topic_keywords = colbert_result.metadata.get("topic_keywords", [])
+        if topic_keywords:
+            colbert_keywords = [
+                KeywordInfo(
+                    text=kw.get("text", ""),
+                    start_idx=kw.get("start_idx", 0),
+                    end_idx=kw.get("end_idx", 0),
+                    score=kw.get("score", 0.0),
+                )
+                for kw in topic_keywords
+            ]
+    except Exception as e:
+        logger.error(f"ColBERT attribution failed: {e}")
+    
     return AnalysisResult(
         source_text=source_text,
         source_id=source_id,
@@ -123,4 +166,6 @@ async def analyze_random(
         target_id=target_id,
         similarity_distance=similarity_distance,
         spans=spans,
+        colbert_topic_keywords=colbert_keywords,
+        sparse_top_tokens=sparse_tokens,
     )

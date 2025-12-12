@@ -72,10 +72,20 @@ def main():
             persist_directory=config.chromadb.persist_directory
         )
 
-        # Data reader (CSV)
+        # Data reader (CSV) with optional minimum content length filter
+        min_content_length = getattr(config.processing, 'min_content_length', 0)
         reader = CSVReader(
-            skip_empty_content=config.processing.skip_empty_content
+            skip_empty_content=config.processing.skip_empty_content,
+            min_content_length=min_content_length
         )
+
+        if min_content_length > 0:
+            logger.info(f"Content filter: min_content_length = {min_content_length}")
+
+        # Check clear_before_import setting
+        clear_before_import = getattr(config.processing, 'clear_before_import', False)
+        if clear_before_import:
+            logger.info("Mode: clear_before_import = True (collections will be cleared)")
 
         # Batch processor
         processor = BatchProcessor(

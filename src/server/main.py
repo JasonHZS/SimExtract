@@ -16,7 +16,8 @@ from src.server.routers import health, analysis, static
 from src.server.dependencies import (
     get_chroma_store,
     get_sparse_attribution,
-    get_segmented_attribution
+    get_segmented_attribution,
+    get_colbert_attribution
 )
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,12 @@ async def lifespan(app: FastAPI):
             logger.warning("SegmentedAttribution not available (TEI not running?)")
     except Exception as e:
         logger.warning(f"SegmentedAttribution initialization skipped: {e}")
+    
+    try:
+        colbert = get_colbert_attribution()
+        logger.info(f"ColBERTAttribution ready: {colbert.model_name}")
+    except Exception as e:
+        logger.error(f"Failed to initialize ColBERTAttribution: {e}")
     
     logger.info("=" * 60)
     logger.info("Server ready! Visit http://localhost:8001")
