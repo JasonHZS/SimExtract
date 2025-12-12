@@ -58,7 +58,7 @@ def parse_arguments(config_defaults=None):
   uv run python src/experiments/test_sparse_attribution.py --collection xingqiu_chuangye --n 5
 
   # 调整 sparse sliding window 参数
-  uv run python src/experiments/test_sparse_attribution.py --window-size 50 --window-step 15
+  uv run python src/experiments/test_sparse_attribution.py --window-size 50 --window-overlap 40
 
   # 显示更多 top tokens（打印用）
   uv run python src/experiments/test_sparse_attribution.py --top-n 20
@@ -101,14 +101,14 @@ def parse_arguments(config_defaults=None):
     parser.add_argument(
         "--window-size",
         type=int,
-        default=config_defaults.get("window_size", 30),
-        help=f"滑动窗口 token 数量 (默认: {config_defaults.get('window_size', 30)})"
+        default=config_defaults.get("window_size", 50),
+        help=f"滑动窗口 token 数量 (默认: {config_defaults.get('window_size', 50)})"
     )
     parser.add_argument(
-        "--window-step",
+        "--window-overlap",
         type=int,
-        default=config_defaults.get("window_step", 10),
-        help=f"滑动窗口步长 token 数量 (默认: {config_defaults.get('window_step', 10)})"
+        default=config_defaults.get("window_overlap", 40),
+        help=f"滑动窗口重叠 token 数量 (默认: {config_defaults.get('window_overlap', 40)})"
     )
     parser.add_argument(
         "--top-n",
@@ -206,7 +206,7 @@ def print_similar_document_with_sparse_attribution(
     print(f"  - num_contributing_tokens: {attribution_result.metadata.get('num_contributing_tokens', 0)}")
     print(f"  - total_windows_analyzed: {attribution_result.metadata.get('total_windows_analyzed', 0)}")
     print(f"  - window_size: {attribution_result.metadata.get('window_size', None)}")
-    print(f"  - window_step: {attribution_result.metadata.get('window_step', None)}")
+    print(f"  - window_overlap: {attribution_result.metadata.get('window_overlap', None)}")
 
     if not attribution_result.spans:
         print("\n⚠️ 未提取到 spans（可能没有共同 token 或文本过短）")
@@ -244,7 +244,7 @@ def main():
     print_separator("=")
     print(f"配置:")
     print(f"  滑动窗口大小: {args.window_size} tokens")
-    print(f"  滑动窗口步长: {args.window_step} tokens")
+    print(f"  滑动窗口重叠: {args.window_overlap} tokens")
     print(f"  打印 Top-N tokens: {args.top_n}")
     print(f"  Top-K 片段: {args.top_k_spans}")
     print(f"  使用 FP16: {not args.no_fp16}")
@@ -301,7 +301,7 @@ def main():
             "model_name": args.model_name,
             "use_fp16": config_defaults.get("use_fp16", True) if not args.no_fp16 else False,
             "window_size": args.window_size,
-            "window_step": args.window_step,
+            "window_overlap": args.window_overlap,
             "top_k_spans": args.top_k_spans,
         }
         

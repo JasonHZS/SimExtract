@@ -61,7 +61,7 @@ class SparseAttribution(AttributionMethod):
                 - use_fp16: bool, whether to use half precision (default: True)
                 - device: str, device to use (default: auto-detect)
                 - window_size: int, sliding window token count (default: 30)
-                - window_step: int, sliding step token count (default: 10)
+                - window_overlap: int, token overlap between windows (default: 20)
                 - top_k_spans: int, number of top spans to return (default: 5)
 
         Raises:
@@ -73,16 +73,16 @@ class SparseAttribution(AttributionMethod):
         self.use_fp16 = config.get("use_fp16", True)
         self.device = config.get("device", None)
         self.window_size = config.get("window_size", 50)
-        self.window_step = config.get("window_step", 10)
+        self.window_overlap = config.get("window_overlap", 40)
         self.top_k_spans = config.get("top_k_spans", 3)
 
         # Validate window parameters
-        if self.window_step <= 0:
-            raise ValueError("window_step must be positive")
         if self.window_size <= 0:
             raise ValueError("window_size must be positive")
-        if self.window_step > self.window_size:
-            raise ValueError("window_step should not exceed window_size")
+        if self.window_overlap < 0:
+            raise ValueError("window_overlap must be non-negative")
+        if self.window_overlap >= self.window_size:
+            raise ValueError("window_overlap must be less than window_size")
 
         # Initialize the model
         self._model = None
@@ -90,7 +90,7 @@ class SparseAttribution(AttributionMethod):
 
         logger.info(
             f"SparseAttribution initialized: model={self.model_name}, "
-            f"window_size={self.window_size}, window_step={self.window_step}"
+            f"window_size={self.window_size}, window_overlap={self.window_overlap}"
         )
 
     def _initialize_model(self) -> None:
@@ -331,6 +331,9 @@ class SparseAttribution(AttributionMethod):
         # Sliding window computation
         windows = []
         num_tokens = len(tokens)
+        step_size = self.window_size - self.window_overlap
+        if step_size < 1:
+            step_size = 1
 
         window_start = 0
         while window_start < num_tokens:
@@ -363,7 +366,7 @@ class SparseAttribution(AttributionMethod):
             })
 
             # Move window
-            window_start += self.window_step
+            window_start += step_size
 
             # If we've covered all tokens, break
             if window_end >= num_tokens:
@@ -474,7 +477,7 @@ class SparseAttribution(AttributionMethod):
                     "num_contributing_tokens": len(contributions),
                     "top_contributing_tokens": top_tokens,
                     "window_size": self.window_size,
-                    "window_step": self.window_step,
+                    "window_overlap": self.window_overlap,
                     "total_windows_analyzed": len(windows),
                 }
             )

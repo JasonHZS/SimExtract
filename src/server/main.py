@@ -1,7 +1,15 @@
 """Main entry point for the application."""
 
 import logging
+import sys  # <--- 新增
 from contextlib import asynccontextmanager
+
+# <--- 新增/修改：在导入 FastAPI 之前配置日志，确保输出到控制台
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
 from fastapi import FastAPI
 from src.server.routers import health, analysis, static
