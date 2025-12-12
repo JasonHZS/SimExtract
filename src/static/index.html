@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SimExtract - Attribution Comparison</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #F5F5F7; /* Cursor light background */
+            color: #1F1F1F; /* Dark text */
+            min-height: 100vh;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Left panel - Source text */
+        .left-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start; /* Align to top for left-right consistency */
+            align-items: center;
+            padding: 40px;
+            padding-top: 6vh; /* Reduced top padding for more content space */
+            background-color: #FFFFFF; /* White panel */
+            border-right: 1px solid #E5E5E5; /* Subtle separator */
+        }
+
+        .left-panel h2,
+        .cards-view h2 {
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            font-weight: 600;
+            color: #666;
+            margin-bottom: 24px;
+        }
+
+        .cards-view h2 {
+            text-align: center;
+        }
+
+        .source-text {
+            font-size: 15px;
+            line-height: 1.7;
+            text-align: left;
+            max-width: 90%;
+            padding: 30px;
+            background: #F9F9FB; /* Very light gray for code/text block */
+            border-radius: 12px;
+            border: 1px solid #EAEAEA;
+            max-height: 80vh; /* Increased for more content display */
+            overflow-y: auto;
+            color: #333;
+            white-space: pre-wrap; /* Preserve whitespace and line breaks */
+            font-family: inherit;
+        }
+
+        .target-text-full {
+            font-size: 15px;
+            line-height: 1.7;
+            color: #333;
+            background: #FFFFFF;
+            padding: 30px;
+            border-radius: 12px;
+            border: 1px solid #EAEAEA;
+            flex: 1;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.03);
+            font-family: inherit;
+        }
+
+        .source-meta {
+            margin-top: 16px;
+            font-size: 12px;
+            color: #888;
+            font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+        }
+
+        /* Right panel - Attribution cards */
+        .right-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start; /* Align to top for left-right consistency */
+            padding: 40px;
+            padding-top: 6vh; /* Same as left panel for alignment */
+            gap: 24px;
+            background-color: #FFFFFF; /* Changed to White to match left panel */
+            position: relative; /* For absolute positioning of detail view */
+            overflow: hidden; /* Contain transitions */
+        }
+
+        .cards-view {
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            width: 100%;
+        }
+
+        .cards-view.hidden {
+            opacity: 0;
+            transform: translateX(-20px);
+            pointer-events: none;
+            position: absolute; /* Take out of flow */
+        }
+
+        /* Detail View (Full Text) */
+        .detail-view {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 40px;
+            padding-top: 6vh; /* Same as left panel for alignment */
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start; /* Align to top for left-right consistency */
+            align-items: center; /* Center horizontally */
+            opacity: 0;
+            transform: translateX(20px);
+            pointer-events: none;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            background: #FFFFFF;
+            z-index: 10;
+        }
+
+        .detail-view.active {
+            opacity: 1;
+            transform: translateX(0);
+            pointer-events: all;
+        }
+
+        .detail-header {
+            display: flex;
+            justify-content: flex-end; /* Align title to the right */
+            align-items: center;
+            margin-bottom: 24px;
+            width: 100%;
+            max-width: 90%; /* Match source-text width constraint */
+        }
+
+        .back-button {
+            position: absolute; /* Move to top-left corner of the panel */
+            top: 40px;
+            left: 40px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #666;
+            cursor: pointer;
+            padding: 8px 12px;
+            background: rgba(0,0,0,0.05);
+            border-radius: 6px;
+            transition: all 0.2s;
+            z-index: 20;
+        }
+
+        .back-button:hover {
+            background: rgba(0,0,0,0.1);
+            color: #333;
+        }
+
+        .detail-title {
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+        }
+
+        .target-text-full {
+            font-size: 15px;
+            line-height: 1.7;
+            color: #333;
+            background: #F9F9FB; /* Match source-text background */
+            padding: 30px;
+            border-radius: 12px;
+            border: 1px solid #EAEAEA;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-family: inherit;
+            width: 100%;
+            max-width: 90%; /* Match source-text width */
+            max-height: 80vh; /* Match source-text height */
+            flex: initial; /* Don't stretch */
+        }
+
+        .highlight-span {
+            background-color: #FFD8A8; /* Low saturation orange */
+            color: #000;
+            border-radius: 4px;
+            padding: 2px 0;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+
+        .cards-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px; /* Space between cards */
+        }
+
+        .attribution-card {
+            background: #F9F9FB; /* Same as source-text background */
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid #EAEAEA;
+            transition: all 0.2s ease;
+            cursor: pointer; /* Clickable */
+        }
+
+        .attribution-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+            border-color: #D5D5D5;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: flex-start;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .method-name {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            font-weight: 700;
+        }
+
+        .method-name.sparse {
+            color: #6366F1; /* Indigo/Purple similar to Cursor brand */
+        }
+
+        .method-name.segmented {
+            color: #F59E0B; /* Amber/Orange */
+        }
+
+        .span-text {
+            font-size: 15px;
+            line-height: 1.7;
+            color: #333;
+            max-height: 180px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        .span-meta {
+            margin-top: 12px;
+            font-size: 11px;
+            color: #999;
+            font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+        }
+
+        /* Full text expansion */
+        /* Removed old expansion styles */
+
+        /* Random button */
+        .random-button {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 14px 32px;
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            background: #000000; /* Solid black */
+            color: white;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 100;
+        }
+
+        .random-button:hover {
+            background: #333333;
+            transform: translateX(-50%) translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+        }
+
+        .random-button:active {
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .random-button:disabled {
+            background: #E5E5E5;
+            color: #999;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        /* Collection selector */
+        .collection-selector {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .collection-selector label {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #666;
+        }
+
+        .collection-selector select {
+            padding: 8px 32px 8px 12px;
+            font-size: 13px;
+            font-weight: 500;
+            color: #333;
+            background: #FFFFFF;
+            border: 1px solid #E5E5E5;
+            border-radius: 8px;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M3 4.5L6 7.5L9 4.5'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            min-width: 180px;
+            transition: all 0.2s ease;
+        }
+
+        .collection-selector select:hover {
+            border-color: #D5D5D5;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+        }
+
+        .collection-selector select:focus {
+            outline: none;
+            border-color: #000;
+            box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+        }
+
+        .collection-count {
+            font-size: 11px;
+            color: #999;
+            font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+        }
+
+        /* Loading state */
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+            filter: grayscale(100%);
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Empty / Error states */
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #9CA3AF;
+            font-size: 14px;
+        }
+
+        .error-state {
+            color: #DC2626;
+            padding: 20px;
+            background: #FEF2F2;
+            border-radius: 12px;
+            margin: 20px 0;
+            border: 1px solid #FEE2E2;
+            font-size: 14px;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #D1D5DB;
+            border-radius: 4px;
+            border: 2px solid transparent;
+            background-clip: content-box;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #9CA3AF;
+            border: 2px solid transparent;
+            background-clip: content-box;
+        }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .container {
+                flex-direction: column;
+            }
+
+            .left-panel {
+                border-right: none;
+                border-bottom: 1px solid #E5E5E5;
+                padding: 30px 20px;
+                padding-top: 70px; /* Make room for collection selector */
+            }
+
+            .right-panel {
+                padding: 30px 20px 100px;
+            }
+
+            .random-button {
+                bottom: 20px;
+                padding: 12px 24px;
+                font-size: 13px;
+            }
+
+            .collection-selector {
+                top: 10px;
+                left: 10px;
+                right: 10px;
+            }
+
+            .collection-selector select {
+                min-width: 140px;
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Collection selector -->
+    <div class="collection-selector">
+        <label for="collection-select">Collection</label>
+        <select id="collection-select">
+            <option value="">Loading...</option>
+        </select>
+        <span class="collection-count" id="collection-count"></span>
+    </div>
+
+    <div class="container">
+        <!-- Left panel: Source text -->
+        <div class="left-panel">
+            <h2>Source Text</h2>
+            <div class="source-text" id="source-text">
+                <div class="empty-state">
+                    Click "Random Draw" to sample a document pair
+                </div>
+            </div>
+            <div class="source-meta" id="source-meta"></div>
+        </div>
+
+        <!-- Right panel: Attribution cards -->
+        <div class="right-panel" id="right-panel">
+            <!-- Cards View -->
+            <div id="cards-view" class="cards-view">
+                <h2>Attribution Analysis (Target Document)</h2>
+                <div class="cards-container" id="cards-container">
+                    <div class="empty-state">
+                        Attribution spans will appear here
+                    </div>
+                </div>
+                <div class="target-meta" id="target-meta" style="font-size: 11px; color: #888; margin-top: 12px; font-family: 'SF Mono', monospace;"></div>
+            </div>
+
+            <!-- Detail View (Initially Hidden) -->
+            <div id="detail-view" class="detail-view">
+                <div class="detail-header">
+                    <div class="back-button" onclick="showCards()">
+                        <span>← Back</span>
+                    </div>
+                    <div class="detail-title" id="detail-title">Method Name</div>
+                </div>
+                <div class="target-text-full" id="detail-text"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Random button -->
+    <button class="random-button" id="random-btn" onclick="fetchRandomPair()">
+        Random Draw
+    </button>
+
+    <script>
+        const sourceTextEl = document.getElementById('source-text');
+        const sourceMetaEl = document.getElementById('source-meta');
+        const cardsContainer = document.getElementById('cards-container');
+        const targetMetaEl = document.getElementById('target-meta');
+        const randomBtn = document.getElementById('random-btn');
+        const cardsView = document.getElementById('cards-view');
+        const detailView = document.getElementById('detail-view');
+        const detailTitle = document.getElementById('detail-title');
+        const detailText = document.getElementById('detail-text');
+        const collectionSelect = document.getElementById('collection-select');
+        const collectionCountEl = document.getElementById('collection-count');
+
+        // Global state
+        let currentData = null;
+        let collectionsData = [];
+
+        // Fetch available collections on load
+        async function fetchCollections() {
+            try {
+                const response = await fetch('/api/collections');
+                const data = await response.json();
+                collectionsData = data.collections || [];
+                
+                if (collectionsData.length === 0) {
+                    collectionSelect.innerHTML = '<option value="">No collections found</option>';
+                    randomBtn.disabled = true;
+                    return;
+                }
+
+                // Populate dropdown
+                collectionSelect.innerHTML = collectionsData.map(c => 
+                    `<option value="${c.name}">${c.name}</option>`
+                ).join('');
+
+                // Update count display
+                updateCollectionCount();
+                
+            } catch (error) {
+                console.error('Failed to fetch collections:', error);
+                collectionSelect.innerHTML = '<option value="">Failed to load</option>';
+            }
+        }
+
+        // Update collection count display when selection changes
+        function updateCollectionCount() {
+            const selected = collectionSelect.value;
+            const collection = collectionsData.find(c => c.name === selected);
+            if (collection) {
+                collectionCountEl.textContent = `${collection.count.toLocaleString()} docs`;
+            } else {
+                collectionCountEl.textContent = '';
+            }
+        }
+
+        collectionSelect.addEventListener('change', updateCollectionCount);
+
+        async function fetchRandomPair() {
+            // Check if collection is selected
+            const selectedCollection = collectionSelect.value;
+            if (!selectedCollection) {
+                cardsContainer.innerHTML = `
+                    <div class="error-state">
+                        <strong>Error:</strong> Please select a collection first
+                    </div>
+                `;
+                return;
+            }
+
+            // Reset view to cards
+            showCards();
+
+            // Set loading state
+            randomBtn.disabled = true;
+            randomBtn.innerHTML = '<span class="loading-spinner"></span>Loading...';
+            sourceTextEl.classList.add('loading');
+            cardsContainer.classList.add('loading');
+
+            try {
+                const response = await fetch('/api/analyze_random', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ collection: selectedCollection })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Request failed');
+                }
+
+                const data = await response.json();
+                currentData = data; // Store data for detail view
+                renderResult(data);
+
+            } catch (error) {
+                console.error('Error:', error);
+                cardsContainer.innerHTML = `
+                    <div class="error-state">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                `;
+            } finally {
+                // Reset button
+                randomBtn.disabled = false;
+                randomBtn.innerHTML = 'Random Draw';
+                sourceTextEl.classList.remove('loading');
+                cardsContainer.classList.remove('loading');
+            }
+        }
+
+        function renderResult(data) {
+            // Render source text
+            sourceTextEl.textContent = data.source_text;
+            sourceMetaEl.textContent = `ID: ${data.source_id} | Length: ${data.source_text.length} chars`;
+
+            // Render target meta
+            const similarityScore = ((1 - data.similarity_distance / 2) * 100).toFixed(1);
+            targetMetaEl.innerHTML = `
+                ID: ${data.target_id} | 
+                Similarity: ${similarityScore}% (distance: ${data.similarity_distance.toFixed(4)}) |
+                Length: ${data.target_text.length} chars
+            `;
+
+            // Render attribution cards
+            if (data.spans.length === 0) {
+                cardsContainer.innerHTML = `
+                    <div class="empty-state">
+                        No attribution spans found
+                    </div>
+                `;
+                return;
+            }
+
+            let cardsHTML = '';
+
+            // Sort: sparse first, then segmented
+            const sortedSpans = [...data.spans].sort((a, b) => {
+                if (a.method === 'sparse') return -1;
+                if (b.method === 'sparse') return 1;
+                return 0;
+            });
+
+            // Store sorted spans back to data for index matching
+            data.sortedSpans = sortedSpans;
+
+            for (let i = 0; i < sortedSpans.length; i++) {
+                const span = sortedSpans[i];
+                const methodLabel = span.method === 'sparse' 
+                    ? 'Sparse (BGE-M3 Lexical)' 
+                    : 'Segmented (Fixed Length)';
+                
+                cardsHTML += `
+                    <div class="attribution-card" onclick="showDetail(${i})">
+                        <div class="card-header">
+                            <span class="method-name ${span.method}">${methodLabel}</span>
+                        </div>
+                        <div class="span-text">${escapeHtml(span.text)}</div>
+                        <div class="span-meta">
+                            Position: [${span.start_idx}:${span.end_idx}] | 
+                            Length: ${span.text.length} chars
+                        </div>
+                    </div>
+                `;
+            }
+
+            cardsContainer.innerHTML = cardsHTML;
+        }
+
+        function showDetail(spanIndex) {
+            if (!currentData || !currentData.sortedSpans) return;
+
+            const span = currentData.sortedSpans[spanIndex];
+            const targetText = currentData.target_text || "";
+            const methodLabel = span.method === 'sparse' 
+                    ? 'Sparse (BGE-M3 Lexical)' 
+                    : 'Segmented (Fixed Length)';
+
+            // Build highlighted full text
+            const start = Math.max(0, span.start_idx);
+            const end = Math.min(targetText.length, span.end_idx);
+            
+            const before = targetText.substring(0, start);
+            const highlight = targetText.substring(start, end);
+            const after = targetText.substring(end);
+            
+            const highlightedHTML = 
+                escapeHtml(before) + 
+                `<span class="highlight-span">${escapeHtml(highlight)}</span>` + 
+                escapeHtml(after);
+
+            // Update detail view content
+            detailTitle.textContent = methodLabel;
+            detailTitle.className = `detail-title ${span.method === 'sparse' ? 'method-name sparse' : 'method-name segmented'}`;
+            detailText.innerHTML = highlightedHTML;
+
+            // Transition
+            cardsView.classList.add('hidden');
+            detailView.classList.add('active');
+
+            // Scroll highlight into view
+            setTimeout(() => {
+                const highlightEl = detailText.querySelector('.highlight-span');
+                if (highlightEl) {
+                    highlightEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 300);
+        }
+
+        function showCards() {
+            cardsView.classList.remove('hidden');
+            detailView.classList.remove('active');
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        // Check health on load
+        async function checkHealth() {
+            try {
+                const response = await fetch('/api/health');
+                const data = await response.json();
+                console.log('Server health:', data);
+                
+                if (!data.sparse_loaded) {
+                    console.warn('Sparse attribution not loaded');
+                }
+                if (!data.segmented_loaded) {
+                    console.warn('Segmented attribution not loaded (TEI may not be running)');
+                }
+            } catch (error) {
+                console.error('Health check failed:', error);
+            }
+        }
+
+        // Initialize page
+        async function init() {
+            await fetchCollections();
+            await checkHealth();
+        }
+
+        init();
+    </script>
+</body>
+</html>
