@@ -30,8 +30,13 @@
 - **优势**: 捕捉深层交互，理论基础强
 - **状态**: 🔲 骨架已建立，待实现
 
-### 3. ColBERT
-生成token级别嵌入，通过Late Interaction机制（MaxSim）计算每个token的归因得分。
+### 3. Token Wise
+生成token级别权重/嵌入，通过 sparce embeddings 或 Late Interaction机制（MaxSim）计算每个token的归因得分。
+
+#### 实现
+
+- 基于 sparse embedding 的 token 权重：支持。bge-m3在生成稠密向量的同时可返回每个词项的“lexical weights”（近似 BM25 风格的 learned sparse 权重），并能计算文档间的词项匹配得分与逐词贡献。
+- 基于 ColBERT 的 token 权重：支持获取每个 token 的向量（multi-vector/late interaction），可用这些向量计算 token 对齐的相似度贡献；官方 API给出整体 ColBERT 分数，但你可以用返回的 token 向量自行得到逐 token 的权重或对齐矩阵。
 
 - **优势**: Token级精细度，保留上下文
 - **状态**: 🔲 骨架已建立，待实现

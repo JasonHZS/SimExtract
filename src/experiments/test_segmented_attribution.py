@@ -15,6 +15,7 @@
 """
 
 import sys
+import argparse
 from pathlib import Path
 from typing import List
 
@@ -26,6 +27,83 @@ from src.data_pipeline.stores.chroma_store import ChromaStore
 from src.data_pipeline.samplers import RandomQuerySampler
 from src.attribution.segmented.method import SegmentedAttribution
 from src.data_pipeline.vectorizers.tei_vectorizer import TEIVectorizer
+
+
+def parse_arguments():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(
+        description="使用 SegmentedAttribution 提取相似文档中的关键片段",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例用法:
+  # 使用默认参数
+  uv run python src/experiments/test_segmented_attribution.py
+
+  # 自定义分段参数
+  uv run python src/experiments/test_segmented_attribution.py --chunk-size 100 --chunk-overlap 20
+
+  # 使用句子分段
+  uv run python src/experiments/test_segmented_attribution.py --segmentation-method fixed_sentences --num-sentences 3
+
+  # 自定义集合和结果数量
+  uv run python src/experiments/test_segmented_attribution.py --collection my_collection --n 5
+        """
+    )
+
+    # 基本配置参数
+    parser.add_argument(
+        "--collection",
+        type=str,
+        default="xingqiu_chuangye",
+        help="ChromaDB 集合名称 (默认: xingqiu_chuangye)"
+    )
+    parser.add_argument(
+        "--n",
+        type=int,
+        default=1,
+        help="返回最相似的文档数量 (默认: 1)"
+    )
+    parser.add_argument(
+        "--random-seed",
+        type=int,
+        default=None,
+        help="随机种子，用于可重复的结果 (默认: None，每次随机)"
+    )
+    parser.add_argument(
+        "--persist-dir",
+        type=str,
+        default="./chroma_db",
+        help="ChromaDB 持久化目录 (默认: ./chroma_db)"
+    )
+
+    # SegmentedAttribution 配置
+    parser.add_argument(
+        "--segmentation-method",
+        type=str,
+        choices=["fixed_length", "fixed_sentences"],
+        default="fixed_length",
+        help="分段方法 (默认: fixed_length)"
+    )
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=50,
+        help="分块大小（token数量，中文≈50字，英文≈50词） (默认: 50)"
+    )
+    parser.add_argument(
+        "--chunk-overlap",
+        type=int,
+        default=10,
+        help="分块重叠的token数量 (默认: 10)"
+    )
+    parser.add_argument(
+        "--num-sentences",
+        type=int,
+        default=3,
+        help="句子分段时每段的句子数量（仅在 segmentation-method=fixed_sentences 时使用） (默认: 3)"
+    )
+
+    return parser.parse_args()
 
 
 def print_separator(char="=", length=100):
@@ -122,62 +200,53 @@ def print_similar_document_with_segments(
 def main():
     """主函数"""
 
-    # ============== 配置参数 ==============
-    PERSIST_DIR = "./chroma_db"
-    COLLECTION_NAME = "xingqiu_chuangye"  # 可修改为其他集合
-    N_RESULTS = 1  # 返回最相似的3个文档
-    RANDOM_SEED = None  # 设置为None则每次随机，设置数字则可重复
+    # 解析命令行参数
+    args = parse_arguments()
 
-    # TEI 服务配置
+    # TEI 服务配置（硬编码）
     TEI_API_URL = "http://localhost:8080/embed"
     TEI_BATCH_SIZE = 64
     TEI_TIMEOUT = 60
     TEI_DIMENSION = 384  # all-MiniLM-L6-v2 的维度是 384
 
-    # SegmentedAttribution 配置
-    SEGMENTATION_METHOD = "fixed_length"  # "fixed_length" 或 "fixed_sentences"
-    CHUNK_SIZE = 50  # token数量（中文≈50字，英文≈50词）
-    CHUNK_OVERLAP = 10  # 重叠token数
-    NUM_SENTENCES = 3  # 句子分段时每段句子数
-
     print_separator("=")
     print("📊 SegmentedAttribution 相似片段提取测试")
     print_separator("=")
     print(f"配置:")
-    print(f"  集合名称: {COLLECTION_NAME}")
-    print(f"  相似文档数量: {N_RESULTS}")
-    print(f"  随机种子: {RANDOM_SEED if RANDOM_SEED else '随机'}")
+    print(f"  集合名称: {args.collection}")
+    print(f"  相似文档数量: {args.n}")
+    print(f"  随机种子: {args.random_seed if args.random_seed else '随机'}")
     print(f"  TEI 服务: {TEI_API_URL}")
-    print(f"  分段方法: {SEGMENTATION_METHOD}")
-    print(f"  分块大小: {CHUNK_SIZE} tokens")
-    print(f"  分块重叠: {CHUNK_OVERLAP} tokens")
-    if SEGMENTATION_METHOD == "fixed_sentences":
-        print(f"  每段句子数: {NUM_SENTENCES}")
+    print(f"  分段方法: {args.segmentation_method}")
+    print(f"  分块大小: {args.chunk_size} tokens")
+    print(f"  分块重叠: {args.chunk_overlap} tokens")
+    if args.segmentation_method == "fixed_sentences":
+        print(f"  每段句子数: {args.num_sentences}")
     print_separator("=")
     print()
 
     try:
         # ============== 1. 初始化 ChromaStore ==============
-        chroma_store = ChromaStore(persist_directory=PERSIST_DIR)
+        chroma_store = ChromaStore(persist_directory=args.persist_dir)
 
         # 验证集合存在
         collections = chroma_store.list_collections()
-        if COLLECTION_NAME not in collections:
-            print(f"✗ 错误: 集合 '{COLLECTION_NAME}' 不存在!")
+        if args.collection not in collections:
+            print(f"✗ 错误: 集合 '{args.collection}' 不存在!")
             print(f"可用集合: {', '.join(collections)}")
             return
 
         # 获取集合
-        collection = chroma_store.get_collection(COLLECTION_NAME)
+        collection = chroma_store.get_collection(args.collection)
         total_docs = collection.count()
 
         # ============== 2. 创建采样器 ==============
-        sampler = RandomQuerySampler(chroma_store, random_seed=RANDOM_SEED)
+        sampler = RandomQuerySampler(chroma_store, random_seed=args.random_seed)
 
         # ============== 3. 执行采样和查询 ==============
         results = sampler.sample_and_query(
-            collection_name=COLLECTION_NAME,
-            n_results=N_RESULTS
+            collection_name=args.collection,
+            n_results=args.n
         )
 
         # ============== 4. 提取查询结果 ==============
@@ -211,10 +280,10 @@ def main():
 
         # ============== 6. 初始化 SegmentedAttribution ==============
         attribution_config = {
-            "segmentation_method": SEGMENTATION_METHOD,
-            "chunk_size": CHUNK_SIZE,
-            "chunk_overlap": CHUNK_OVERLAP,
-            "num_sentences": NUM_SENTENCES,
+            "segmentation_method": args.segmentation_method,
+            "chunk_size": args.chunk_size,
+            "chunk_overlap": args.chunk_overlap,
+            "num_sentences": args.num_sentences,
             "vectorizer": vectorizer  # 使用 TEI vectorizer
         }
 
@@ -222,7 +291,7 @@ def main():
 
         # ============== 7. 对每个相似文档提取相似片段 ==============
         print_separator("=")
-        print(f"🔬 分析 Top {N_RESULTS} 相似文档的最相似片段")
+        print(f"🔬 分析 Top {args.n} 相似文档的最相似片段")
         print_separator("=")
         print()
 

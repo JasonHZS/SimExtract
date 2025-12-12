@@ -230,3 +230,6 @@ config/
 
 # Local test files
 src/experiments/test_similarity_query.py
+
+# 模型文件
+models/

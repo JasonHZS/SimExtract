@@ -4,12 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SimExtract is a similarity attribution research platform that identifies and extracts key spans from text B that contribute most to its similarity with text A. The project implements four different attribution methods:
+SimExtract is a similarity attribution research platform that identifies and extracts key spans from text B that contribute most to its similarity with text A. The project explores and compares four different attribution methods:
 
-1. **Segmented Vectorization**: Splits text B into segments and computes vector similarity with text A
-2. **Cross-Encoder Attention Analysis**: Uses BERT Cross-Encoder attention matrices to extract token-level attributions
-3. **ColBERT**: Generates token-level embeddings with Late Interaction (MaxSim) mechanism
-4. **Late Chunking**: Performs intelligent chunking at the embedding layer while preserving global context
+1. **Segmented Vectorization**: Splits text B into segments (sentences/fixed-length/semantic units) and computes vector similarity with text A
+   - Advantages: Simple implementation, computationally efficient
+   - Status: Skeleton established, pending implementation
+
+2. **Cross-Encoder Attention Analysis**: Uses BERT Cross-Encoder to process `[CLS] A [SEP] B [SEP]` and analyzes attention matrices to extract attention weights from A's tokens to B's tokens
+   - Advantages: Captures deep interactions, strong theoretical foundation
+   - Status: Skeleton established, pending implementation
+
+3. **Token Wise**: Generates token-level weights/embeddings through sparse embeddings or Late Interaction mechanisms (MaxSim) to calculate attribution scores for each token
+   - Implementation approaches:
+     - **Sparse embedding-based token weights**: Supported via BGE-M3, which can return "lexical weights" (learned sparse weights similar to BM25) for each term while generating dense vectors, enabling term-matching scores and per-word contributions
+     - **ColBERT-based token weights**: Supports obtaining vectors for each token (multi-vector/late interaction) to calculate token alignment similarity contributions; official API provides overall ColBERT scores, but returned token vectors can be used to derive per-token weights or alignment matrices
+   - Advantages: Token-level granularity, preserves context
+   - Status: Skeleton established, pending implementation
+
+4. **Late Chunking**: First generates full-text contextual embeddings, then performs intelligent chunking and aggregation at the embedding layer
+   - Advantages: Preserves global context, semantic chunking
+   - Status: Skeleton established, pending implementation
 
 ## Architecture
 
@@ -106,7 +120,7 @@ src/
 │   ├── base.py          # Abstract base classes and result dataclasses
 │   ├── segmented/       # Segmented vectorization method
 │   ├── cross_encoder/   # Cross-encoder attention method
-│   ├── colbert/         # ColBERT token-level method
+│   ├── token_wise/      # Token-level attribution (sparse embeddings + ColBERT)
 │   └── late_chunking/   # Late chunking method
 ├── data_pipeline/       # Data ingestion pipeline
 │   ├── readers/         # Data source readers (CSV, etc.)
