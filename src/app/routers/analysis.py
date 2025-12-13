@@ -9,8 +9,8 @@ from src.data_pipeline.stores.chroma_store import ChromaStore
 from src.attribution.segmented import SegmentedAttribution
 from src.attribution.token_wise import SparseAttribution, ColBERTAttribution
 
-from src.server.schemas import AnalysisRequest, AnalysisResult, SpanInfo, KeywordInfo, SparseTokenInfo
-from src.server.dependencies import (
+from src.app.schemas import AnalysisRequest, AnalysisResult, SpanInfo, KeywordInfo, SparseTokenInfo
+from src.app.dependencies import (
     get_chroma_store,
     get_sparse_attribution,
     get_segmented_attribution,

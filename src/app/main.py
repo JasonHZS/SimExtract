@@ -12,8 +12,8 @@ logging.basicConfig(
 )
 
 from fastapi import FastAPI
-from src.server.routers import health, analysis, static
-from src.server.dependencies import (
+from src.app.routers import health, analysis, static
+from src.app.dependencies import (
     get_chroma_store,
     get_sparse_attribution,
     get_segmented_attribution,
@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
     """Lifecycle manager: load models at startup."""
     # Log device config at startup.
     try:
-        from src.server.config import load_config
+        from src.app.config import load_config
         config = load_config()
         sparse_config = config.get("sparse", {})
         device = sparse_config.get("device")
@@ -102,7 +102,7 @@ if __name__ == "__main__":
     )
     
     uvicorn.run(
-        "src.server.main:app",
+        "src.app.main:app",
         host="0.0.0.0",
         port=8001,
         reload=True,

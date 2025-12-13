@@ -4,8 +4,8 @@ import logging
 from typing import List
 
 from fastapi import APIRouter, Depends
-from src.server.schemas import HealthResponse, CollectionsResponse, CollectionInfo
-from src.server.dependencies import (
+from src.app.schemas import HealthResponse, CollectionsResponse, CollectionInfo
+from src.app.dependencies import (
     get_chroma_store,
     get_sparse_attribution,
     get_segmented_attribution,
@@ -55,7 +55,7 @@ async def health_check(
     try:
         # We access the singleton directly to check if it's loaded without re-instantiating
         # if dependencies cache logic is used, calling the dependency function is fine
-        from src.server.dependencies import get_sparse_attribution
+        from src.app.dependencies import get_sparse_attribution
         sparse = get_sparse_attribution()
         sparse_loaded = sparse._model is not None
     except Exception:
@@ -63,7 +63,7 @@ async def health_check(
     
     segmented_loaded = False
     try:
-        from src.server.dependencies import get_segmented_attribution
+        from src.app.dependencies import get_segmented_attribution
         segmented = get_segmented_attribution()
         segmented_loaded = segmented is not None
     except Exception:
@@ -71,7 +71,7 @@ async def health_check(
     
     colbert_loaded = False
     try:
-        from src.server.dependencies import get_colbert_attribution
+        from src.app.dependencies import get_colbert_attribution
         colbert = get_colbert_attribution()
         colbert_loaded = colbert._model is not None
     except Exception:

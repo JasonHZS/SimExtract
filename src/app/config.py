@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Dict
 import yaml
 
-# Adjust path: src/server/config.py -> src/server -> src -> root
+# Adjust path: src/app/config.py -> src/app -> src -> root
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config" / "attribution.yaml"
 CHROMA_DB_PATH = PROJECT_ROOT / "chroma_db"

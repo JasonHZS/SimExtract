@@ -5,14 +5,14 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-# Adjust path: src/server/routers/static.py -> src/server/routers -> src/server -> src -> root
-# Original path was src/static, so from src/server/routers we go up 3 levels to src/static?
-# No, PROJECT_ROOT is in src/server/config.py, let's use that or relative path
+# Adjust path: src/app/routers/static.py -> src/app/routers -> src/app -> src -> root
+# Original path was src/static, so from src/app/routers we go up 3 levels to src/static?
+# No, PROJECT_ROOT is in src/app/config.py, let's use that or relative path
 # src/static is where the files are.
 # From this file: ../../../src/static
 # Or just absolute path via config.
 
-from src.server.config import PROJECT_ROOT
+from src.app.config import PROJECT_ROOT
 
 router = APIRouter()
 

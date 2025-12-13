@@ -10,10 +10,10 @@
 
 ```bash
 # 使用 uv (推荐)
-uv run uvicorn src.server.main:app --reload --host 0.0.0.0 --port 8001
+uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8001
 
 # 或者使用标准 python 模块方式
-python -m uvicorn src.server.main:app --reload --host 0.0.0.0 --port 8001
+python -m uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
 ### 访问服务
@@ -30,7 +30,7 @@ python -m uvicorn src.server.main:app --reload --host 0.0.0.0 --port 8001
 
 ```bash
 # 让进程只看到物理 GPU-1（在进程内会变成 cuda:0）
-CUDA_VISIBLE_DEVICES=1 uv run uvicorn src.server.main:app --reload --host 0.0.0.0 --port 8001
+CUDA_VISIBLE_DEVICES=1 uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
 - **依赖服务**:

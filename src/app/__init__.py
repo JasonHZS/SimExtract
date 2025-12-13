@@ -1,5 +1,5 @@
 """Server package."""
 
-from src.server.main import app
+from src.app.main import app
 
 __all__ = ["app"]

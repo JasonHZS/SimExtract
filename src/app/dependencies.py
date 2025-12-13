@@ -7,7 +7,7 @@ from typing import Optional
 from src.data_pipeline.stores.chroma_store import ChromaStore
 from src.attribution.segmented import SegmentedAttribution
 from src.attribution.token_wise import SparseAttribution, ColBERTAttribution
-from src.server.config import CHROMA_DB_PATH, load_config
+from src.app.config import CHROMA_DB_PATH, load_config
 
 logger = logging.getLogger(__name__)
 
