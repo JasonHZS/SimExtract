@@ -160,9 +160,10 @@ uv sync
 # Run data preparation
 python scripts/prepare_data.py
 
-# Run attribution tests
-python tests/test_segmented_attribution.py  # Unit test with MockVectorizer
-python -m src.experiments.test_segmented_attribution  # E2E test with TEI
+# Run tests (three-tier strategy)
+python tests/test_sparse_attribution.py  # Unit test (mock, fast)
+CUDA_VISIBLE_DEVICES=1 python tests/test_sparse_integration.py  # Integration test (real model)
+python src/experiments/demo_sparse_attribution_with_chroma.py --n 3  # E2E demo (with ChromaDB)
 
 # Test random sampling
 python scripts/test_random_sampler.py --collection <name> --n 5
@@ -252,10 +253,52 @@ logs/                  # Timestamped log files
 
 ### Testing Strategy
 
-- **Unit tests** in `tests/`: Mock-based tests (e.g., `MockVectorizer`) for fast, isolated testing without external dependencies
-- **E2E tests** in `src/experiments/`: Integration tests with real TEI service and ChromaDB, documenting required Docker commands
-- No pytest suite yet; run tests directly with `python tests/test_*.py` or `python -m src.experiments.test_*`
-- Name test files consistently: `test_<area>.py`
+SimExtract uses a multi-layered testing approach to ensure both fast iteration and real-world accuracy:
+
+#### 1. Mock-based Unit Tests (`tests/test_*.py`)
+- **Purpose**: Fast validation of business logic (windowing, scoring, ranking, edge cases)
+- **Example**: `tests/test_sparse_attribution.py` - uses `MockTokenizer` and `MockBGEM3Model`
+- **Pros**: No external dependencies, suitable for CI/CD, tests algorithmic correctness
+- **Cons**: Cannot verify compatibility with real models (tokenization, API contracts)
+- **When to use**: Rapid development, testing logic changes, CI pipeline
+
+#### 2. Integration Tests (`tests/test_*_integration.py`)
+- **Purpose**: Validate real model behavior and API contracts
+- **Example**: `tests/test_sparse_integration.py` - uses actual BGE-M3 model from `models/` directory
+- **Key verifications**:
+  - Tokenizer behavior (WordPiece/XLMRoberta tokenization)
+  - API return formats (`lexical_weights` uses string keys, not int; weights are `np.float16` with FP16)
+  - Character offset mapping accuracy
+  - Core function outputs with real embeddings
+- **Pros**: Ensures implementation matches real model behavior, catches API assumption errors
+- **Cons**: Requires model download, GPU resources, slower execution
+- **When to use**: Before merging features, validating mock accuracy, debugging model integration issues
+- **Run with**: `CUDA_VISIBLE_DEVICES=1 python tests/test_sparse_integration.py`
+
+**Important findings from integration tests:**
+- BGE-M3's `lexical_weights` returns `dict[str, float]` (string keys), not `dict[int, float]`
+- With `use_fp16=True`, weights are `numpy.float16` types, not Python `float`
+- Tokenizer may include leading spaces in token boundaries (e.g., " learning" instead of "learning")
+
+#### 3. End-to-End Demo Scripts (`src/experiments/demo_*.py`)
+- **Purpose**: Manual testing with real ChromaDB data, frontend validation
+- **Example**: `src/experiments/demo_sparse_attribution_with_chroma.py`
+- **Use case**: Testing full pipeline (ChromaDB → attribution → result display), generating examples for users
+- **When to use**: Manual QA, generating demo outputs, testing with production-like data
+
+#### 4. Testing Workflow
+```bash
+# Quick logic check (during development)
+python tests/test_sparse_attribution.py
+
+# Validate real model integration (before merge)
+CUDA_VISIBLE_DEVICES=1 python tests/test_sparse_integration.py
+
+# Manual E2E validation with ChromaDB
+python src/experiments/demo_sparse_attribution_with_chroma.py --collection xingqiu_chuangye --n 3
+```
+
+**Note**: No pytest suite yet; run tests directly with `python tests/test_*.py`
 
 ## Coding Conventions
 

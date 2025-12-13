@@ -1,4 +1,5 @@
-"""Sparse embedding attribution method using BGE-M3 lexical weights."""
+"""Sparse embedding attribution method using BGE-M3 lexical weights.
+参考：https://bge-model.com/API/inference/embedder/encoder_only/M3Embedder.html"""
 
 import logging
 import re
@@ -8,7 +9,7 @@ from threading import Lock
 from typing import Dict, Any, List, Optional, Tuple
 
 from ..base import AttributionMethod, AttributionResult, AttributionSpan
-from .utils import tokenize_with_positions, normalize_score
+from .utils import normalize_score
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +189,8 @@ class SparseAttribution(AttributionMethod):
         # FlagEmbedding(BGE-M3) returns `lexical_weights` as dict[token_id -> weight].
 
         def _token_key(token_id: int) -> str:
+            # clean_up_tokenization_spaces=False: Disable automatic formatting (such as merging punctuation spaces), 
+            # ensure the original token is obtained for precise matching.
             token_str = self.tokenizer.decode(
                 [int(token_id)],
                 clean_up_tokenization_spaces=False,
@@ -282,8 +285,41 @@ class SparseAttribution(AttributionMethod):
                 - token: str, the token string
                 - start: int, character start position
                 - end: int, character end position
+                - index: int, position in the token sequence
         """
-        return tokenize_with_positions(self.tokenizer, text)
+        # Encode with offset mapping
+        # For Chinese text, each character typically gets its own token
+        # with (start, end) representing single-character spans, e.g.:
+        # "机器学习" -> [(0,1), (1,2), (2,3), (3,4)]
+        # For English, tokens may span multiple characters:
+        # "learning" -> [(0,8)]
+        encoding = self.tokenizer(
+            text,
+            return_offsets_mapping=True,
+            add_special_tokens=False
+        )
+
+        tokens = []
+        for idx, (token_id, (start, end)) in enumerate(
+            zip(encoding['input_ids'], encoding['offset_mapping'])
+        ):
+            # Skip special tokens (e.g., [CLS], [SEP], [PAD]) or empty spans.
+            # Empty spans occur when start == end, indicating no actual text content.
+            # Special tokens are typically added by tokenizers for model input formatting
+            # but don't correspond to meaningful text positions in the original string.
+            if start == end:
+                continue
+
+            token_str = self.tokenizer.decode([token_id])
+            tokens.append({
+                "token_id": token_id,
+                "token": token_str,
+                "start": start,
+                "end": end,
+                "index": idx
+            })
+
+        return tokens
 
     def _compute_window_scores(
         self,
@@ -314,12 +350,14 @@ class SparseAttribution(AttributionMethod):
 
         # Build token-to-contribution mapping
         # Note: BGE tokenizer may produce subwords, we need to match them
+        # Map each token to its contribution score from the sparse lexical weights.
+        # This creates a parallel list where token_scores[i] corresponds to tokens[i].
         token_scores = []
         for t in tokens:
             token_text = t["token"].strip()
             # Try exact match first
             score = contributions.get(token_text, 0.0)
-            # Also try lowercase
+            # Also try lowercase to handle case mismatches
             if score == 0.0:
                 score = contributions.get(token_text.lower(), 0.0)
             token_scores.append(score)
