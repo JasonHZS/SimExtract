@@ -41,6 +41,24 @@ The codebase follows a plugin-based architecture with clear separation of concer
 
 - **`src/data_pipeline/samplers/`**: Retrieves document pairs from ChromaDB for attribution experiments. `RandomQuerySampler` randomly selects a document and returns its top-k most similar documents.
 
+- **`src/data_pipeline/rerankers/`**: Cross-encoder based document reranking infrastructure:
+  - `BaseReranker`: Abstract base class for reranking models
+  - `TEIReranker`: Implementation using TEI rerank endpoint with retry logic
+  - `RerankResult`: Dataclass containing reranked documents with scores
+
+- **`src/evaluation/`**: Framework for evaluating attribution quality with three methods:
+  - `BaseEvaluator`: Abstract base class defining the evaluation contract
+  - `DropOneEvaluator`: Ablation-based evaluation measuring similarity drop when span is removed
+  - `CrossEncoderEvaluator`: Uses reranker models to score span relevance
+  - `LLMJudgeEvaluator`: LLM-as-a-Judge evaluation on 1-5 scale
+  - `EvaluationResult`: Dataclass containing evaluation scores and metadata
+
+- **`src/utils/`**: Shared utilities:
+  - `config.py`: YAML configuration parsing with dot-notation access
+  - `logger.py`: Centralized logging with colorlog support
+  - `llm_client.py`: OpenAI-compatible LLM client supporting multiple providers (OpenAI, Dashscope)
+  - `similarity.py`: Common similarity functions (cosine similarity, etc.)
+
 ### Configuration System
 
 Configuration is managed through YAML files parsed by `src/utils/config.py`. The `Config` class provides dot-notation access (e.g., `config.tei.api_url`). All configs live in `config/` directory:
@@ -90,6 +108,44 @@ python scripts/test_random_sampler.py --collection <collection_name> --n 5
 3. For each similar document, call `method.extract(query_text, similar_doc_text)`
 4. Process the returned `AttributionResult` to get top scoring spans via `result.top_k_spans(k)`
 
+### Evaluating Attribution Quality
+
+The project provides three complementary evaluation methods to assess how well extracted spans explain similarity:
+
+#### 1. Drop-One Ablation (`DropOneEvaluator`)
+
+Measures span contribution by computing how much similarity drops when the span is removed
+
+**Use case:** Quantitative measurement of span importance via ablation testing.
+
+#### 2. Cross-Encoder Scoring (`CrossEncoderEvaluator`)
+
+Uses cross-encoder (reranker) models to directly score span relevance to source text
+
+**Use case:** Deep semantic relevance scoring with cross-attention between texts.
+
+**Note:** TEI rerank endpoint requires a cross-encoder model like `cross-encoder/ms-marco-MiniLM-L-6-v2`.
+
+#### 3. LLM-as-a-Judge (`LLMJudgeEvaluator`)
+
+Uses LLMs to provide human-like relevance judgments on a 1-5 scale
+
+#### Environment Setup for LLM Client
+
+Create a `.env` file in project root with your API keys:
+
+```bash
+# Option 1: OpenAI
+OPENAI_API_KEY=sk-xxx
+
+# Option 2: Aliyun Dashscope (China region by default)
+DASHSCOPE_API_KEY=sk-xxx
+
+# For Singapore region, pass region="intl" to LLMClient constructor
+```
+
+**Provider auto-detection priority:** If both keys are set, Dashscope takes precedence.
+
 ## Development Commands
 
 ```bash
@@ -127,9 +183,19 @@ src/
 │   ├── vectorizers/     # Text-to-embedding converters (TEI)
 │   ├── stores/          # Vector stores (ChromaDB)
 │   ├── samplers/        # Document retrieval samplers
+│   ├── rerankers/       # Cross-encoder reranking (TEI)
 │   └── batch_processor.py  # Pipeline orchestration
+├── evaluation/          # Attribution quality evaluation
+│   ├── base.py          # Abstract evaluator base class
+│   ├── drop_one.py      # Drop-one ablation evaluation
+│   ├── cross_encoder.py # Cross-encoder scoring evaluation
+│   └── llm_judge.py     # LLM-as-a-Judge evaluation
 ├── experiments/         # Runnable experiments and tests
-└── utils/              # Shared utilities (config, logging)
+└── utils/              # Shared utilities
+    ├── config.py        # YAML configuration parsing
+    ├── logger.py        # Centralized logging
+    ├── llm_client.py    # OpenAI-compatible LLM client
+    └── similarity.py    # Similarity computation functions
 
 scripts/                # CLI entry points for common tasks
 tests/                  # Unit tests with mock dependencies
@@ -148,12 +214,25 @@ logs/                  # Timestamped log files
 5. Add imports to `src/attribution/__init__.py`
 6. Create a unit test in `tests/test_<method_name>.py` (with MockVectorizer) and/or an E2E test in `src/experiments/test_<method_name>.py` (with real TEI service)
 
+## Adding a New Evaluation Method
+
+1. Create `src/evaluation/<method_name>.py` that inherits from `BaseEvaluator`
+2. Implement `evaluate(source_text, target_text, span) -> EvaluationResult`
+3. Return `EvaluationResult` with:
+   - `score`: The evaluation metric value
+   - `metric_name`: Descriptive name (e.g., "drop_one_contribution")
+   - `metadata`: Dict with additional info (span positions, intermediate values, etc.)
+4. Add imports to `src/evaluation/__init__.py`
+5. Optional: Implement `evaluate_multiple_spans()` for batch efficiency
+6. Create unit tests in `tests/test_<method_name>_evaluation.py`
+
 ## Important Implementation Notes
 
 ### TEI Service Dependency
 
 - ChromaDB is used **only** for vector storage and retrieval, not for vectorization
 - All vectorization goes through TEI service via `TEIVectorizer`
+- All reranking goes through TEI service via `TEIReranker` (requires cross-encoder model)
 - Always call `check_tei_service(url)` before starting batch operations
 - TEI calls are batched according to `config.tei.batch_size` for efficiency
 
