@@ -27,7 +27,7 @@
   - `fixed_sentences`：按句子数量分组（默认3句一组），适合处理文章、新闻等结构化文本
   - `fixed_length`：按 token 数量分段（默认30 tokens，overlap 10），智能处理中英文混合
 - **向量化**：通过 TEI (Text Embeddings Inference) 服务调用 embedding 模型，支持批量处理提升效率
-- **相似度计算**：标准余弦相似度，公式为 `cos(θ) = (A · B) / (||A|| × ||B||)`
+- **相似度计算**：标准余弦相似度，公式为 \(\cos(\theta) = \frac{A \cdot B}{\|A\| \times \|B\|}\)
 - **智能分词**：自动识别 CJK 字符（每字一 token）、英文单词（连续字母）、数字序列
 
 **优势**：
@@ -36,7 +36,7 @@
 - 支持任意 embedding 模型，无需特定模型能力
 
 **工程特性**：
-- **计算复杂度**：`O(n_segments)` 次向量化调用
+- **计算复杂度**：\(O(n_{segments})\) 次向量化调用
 - **延迟**：中等（取决于 TEI 服务响应时间和分段数量）
 - **内存占用**：低（每次只保存分段的 embedding）
 - **适用场景**：长文档归因、段落级粗粒度分析
@@ -47,15 +47,15 @@
 
 **原理**：基于 BGE-M3 模型的 lexical weights（learned sparse representation），类似 BM25 但通过神经网络学习得到。计算公式为：
 
-```
-s_lex = Σ(t∈A∩B) w_a(t) × w_b(t)
-```
+\[
+s_{lex} = \sum_{t \in A \cap B} w_a(t) \times w_b(t)
+\]
 
-其中 `w_a(t)` 和 `w_b(t)` 分别是 token `t` 在文本A和B中的稀疏权重。通过识别交集 token 的贡献，提取高贡献区域。
+其中 \(w_a(t)\) 和 \(w_b(t)\) 分别是 token \(t\) 在文本A和B中的稀疏权重。通过识别交集 token 的贡献，提取高贡献区域。
 
 **实现细节**：
 - **模型**：使用 `BAAI/bge-m3` 的 sparse embedding 能力
-- **Token 贡献计算**：对每个 token 计算 `w_a × w_b`，得到逐 token 的贡献分数
+- **Token 贡献计算**：对每个 token 计算 \(w_a \times w_b\)，得到逐 token 的贡献分数
 - **滑动窗口**：在 token 序列上应用滑动窗口（默认50 tokens，overlap 40），计算窗口内平均贡献分数
 - **Top-K 提取**：返回得分最高的 K 个窗口作为 attribution spans
 - **去重机制**：使用 LRU 缓存避免重复加载模型，支持多进程复用
@@ -66,7 +66,7 @@ s_lex = Σ(t∈A∩B) w_a(t) × w_b(t)
 - 适合关键词匹配类任务（如检索、问答）
 
 **工程特性**：
-- **计算复杂度**：`O(1)` 次模型调用（单次 encode 即可获得所有 token 权重）
+- **计算复杂度**：\(O(1)\) 次模型调用（单次 encode 即可获得所有 token 权重）
 - **延迟**：低（本地模型推理，无需外部服务调用）
 - **内存占用**：中等（需加载完整 BGE-M3 模型，约2GB）
 - **GPU 加速**：支持 FP16，显著降低显存和提升速度
@@ -78,15 +78,14 @@ s_lex = Σ(t∈A∩B) w_a(t) × w_b(t)
 
 **原理**：基于 BGE-M3 的 ColBERT multi-vector representation，每个 token 都有独立的 embedding。使用 MaxSim 机制计算相似度：
 
-```
-s_colbert = (1/N_q) × Σ(i=1..N_q) max(j=1..N_d) E_q[i] · E_d[j]
-```
+\[
+\text{Score}(Q, D) = \sum_{q \in Q} \max_{d \in D} (q \cdot d) 
+\]
 
-对于每个 query token，找到与 document 中最相似的 token，然后对所有 query tokens 求平均。
 
 **实现细节**：
 - **模型**：使用 `BAAI/bge-m3` 的 colbert_vecs 输出
-- **交互矩阵**：计算 query 和 document 所有 token 对之间的余弦相似度矩阵 `[N_q × N_d]`
+- **交互矩阵**：计算 query 和 document 所有 token 对之间的余弦相似度矩阵 \([N_q \times N_d]\)
 - **滑动窗口 MaxSim**：对 document 应用滑动窗口（默认50 tokens），在每个窗口内计算 MaxSim 分数
 - **1D Max Pooling**：使用 `F.max_pool1d` 高效计算窗口内的最大值
 - **Topic Keywords 提取**：额外提取全局高贡献的 topic keywords 作为补充信息
@@ -98,7 +97,7 @@ s_colbert = (1/N_q) × Σ(i=1..N_q) max(j=1..N_d) E_q[i] · E_d[j]
 - 适合处理改写、同义词替换等语义相似但词汇不同的情况
 
 **工程特性**：
-- **计算复杂度**：`O(N_q × N_d)` 矩阵乘法 + `O(N_windows)` 窗口聚合
+- **计算复杂度**：\(O(N_q \times N_d)\) 矩阵乘法 + \(O(N_{windows})\) 窗口聚合
 - **延迟**：中（比 Sparse 稍慢，因为需要构建完整交互矩阵）
 - **内存占用**：高（需存储完整交互矩阵，对长文本可能达到 GB 级别）
 - **GPU 加速**：强烈建议使用 GPU，矩阵运算可充分利用并行计算
