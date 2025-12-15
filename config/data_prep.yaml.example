@@ -1,0 +1,32 @@
+# TEI API Configuration
+tei:
+  api_url: "http://localhost:8080/embed"
+  batch_size: 64
+  max_retries: 3
+  timeout: 60
+
+# ChromaDB Configuration
+chromadb:
+  persist_directory: "./chroma_db"
+  distance_metric: "cosine"
+
+# Processing Configuration
+processing:
+  csv_chunk_size: 1000
+  chroma_batch_size: 100
+  skip_empty_content: true
+
+# Data Files Configuration
+data:
+  input_dir: "./data"
+  files:
+    - name: "example_data.csv"
+      collection: "example_collection"
+    - name: "another_data.csv"
+      collection: "another_collection"
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  log_dir: "./logs"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

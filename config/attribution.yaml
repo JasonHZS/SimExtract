@@ -1,0 +1,49 @@
+# Attribution Method Configuration
+# 归因方法配置文件示例
+
+# Sparse Attribution (BGE-M3 lexical weights)
+sparse:
+  # model_name: HuggingFace model id (e.g. "BAAI/bge-m3") or local path
+  model_name: "models/models--BAAI--bge-m3/snapshots/5617a9f61b028005a4858fdac845db406aefb181"
+  use_fp16: true
+  # NOTE:
+  # - If the server runs on a shared machine, prefer pinning GPU via env:
+  #   CUDA_VISIBLE_DEVICES=1 uv run uvicorn ...
+  #   In that case, the process only sees one GPU and it becomes cuda:0 inside the process.
+  device: "cuda"  # null = auto detect, or "cuda", "cuda:0", "cpu"
+  query_max_length: 1024
+  passage_max_length: 1024
+  window_size: 50  # 滑动窗口 token 数量
+  window_overlap: 10  # 滑动窗口重叠 token 数量
+  top_k_spans: 3   # 返回 top-k 贡献最高的片段
+  top_k_tokens: 5  # 返回 top-k 关键词用于前端展示
+
+# ColBERT Attribution (late interaction with MaxSim scoring)
+colbert:
+  # model_name: HuggingFace model id (e.g. "BAAI/bge-m3") or local path
+  model_name: "models/models--BAAI--bge-m3/snapshots/5617a9f61b028005a4858fdac845db406aefb181"
+  use_fp16: true
+  device: "cuda"  # null = auto detect, or "cuda", "cuda:0", "cpu"
+  query_max_length: 1024
+  passage_max_length: 1024
+  window_size: 50  # 滑动窗口 token 数量
+  window_overlap: 10  # 滑动窗口重叠 token 数量
+  top_k_spans: 3   # 返回 top-k 贡献最高的片段
+  top_k_topic_keywords: 3  # 返回 top-k 全局主题关键词
+
+# Segmented Attribution (segment-level vectorization)
+segmented:
+  segmentation_method: "fixed_length"  # "fixed_length" or "fixed_sentences"
+  chunk_size: 50      # tokens per chunk (for fixed_length)
+  chunk_overlap: 10   # overlap tokens
+  num_sentences: 3    # sentences per segment (for fixed_sentences)
+  vectorizer_config:
+    api_url: "http://localhost:8080/embed"
+    batch_size: 64
+    timeout: 60
+    dimension: 384  # bge-m3 = 1024
+
+# Cross-Encoder Attribution (not yet implemented)
+cross_encoder:
+  model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  max_length: 512
