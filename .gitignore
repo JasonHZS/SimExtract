@@ -225,8 +225,9 @@ experiments/test_cases/*.json
 experiments/test_cases/*.csv
 
 # Configuration files with sensitive data
-config/
-!config/*.example
+# Only ignore specific sensitive config files
+config/data_prep.yaml
+
 
 # Local test files
 src/experiments/test_similarity_query.py
