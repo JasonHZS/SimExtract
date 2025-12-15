@@ -1,6 +1,7 @@
 """Health check router."""
 
 import logging
+from functools import lru_cache
 from typing import List
 
 from fastapi import APIRouter, Depends
@@ -18,14 +19,31 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/collections", response_model=CollectionsResponse)
-async def list_collections(
-    store: ChromaStore = Depends(get_chroma_store),
-):
-    """List all available collections in ChromaDB."""
+@lru_cache(maxsize=1)
+def _get_collections_info_cached(store_id: int) -> List[CollectionInfo]:
+    """Cached helper function to get collection information.
+
+    This function caches collection metadata to avoid repeated count() calls
+    which can be slow for large collections. The cache is keyed by the store's
+    identity (id(store)) and persists for the lifetime of the process.
+
+    To clear the cache:
+    - Restart the server
+    - Call _get_collections_info_cached.cache_clear()
+    - Use the /collections/refresh endpoint
+
+    Args:
+        store_id: Identity hash of the ChromaStore instance (from id(store))
+
+    Returns:
+        List of CollectionInfo objects with name and count
+    """
+    from src.app.dependencies import get_chroma_store
+    store = get_chroma_store()
+
     collection_names = store.list_collections()
-    
     collections: List[CollectionInfo] = []
+
     for name in collection_names:
         try:
             collection = store.get_collection(name)
@@ -33,13 +51,42 @@ async def list_collections(
         except Exception as e:
             logger.warning(f"Failed to get count for collection '{name}': {e}")
             count = 0
-        
+
         collections.append(CollectionInfo(name=name, count=count))
-    
+
     # Sort by count descending (most populated first)
     collections.sort(key=lambda c: c.count, reverse=True)
-    
+
+    return collections
+
+
+@router.get("/collections", response_model=CollectionsResponse)
+async def list_collections(
+    store: ChromaStore = Depends(get_chroma_store),
+):
+    """List all available collections in ChromaDB.
+
+    This endpoint uses caching to improve performance. Collection counts are
+    cached after the first request and reused for subsequent requests until
+    the server is restarted or the cache is manually cleared.
+    """
+    collections = _get_collections_info_cached(id(store))
     return CollectionsResponse(collections=collections)
+
+
+@router.post("/collections/refresh")
+async def refresh_collections_cache():
+    """Clear the collections cache to force refresh.
+
+    Use this endpoint after adding/removing documents from collections
+    to ensure the collection counts are up-to-date.
+
+    Returns:
+        Status message confirming cache was cleared
+    """
+    _get_collections_info_cached.cache_clear()
+    logger.info("Collections cache cleared")
+    return {"status": "ok", "message": "Collections cache cleared successfully"}
 
 
 @router.get("/health", response_model=HealthResponse)

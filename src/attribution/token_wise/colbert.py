@@ -1,7 +1,8 @@
 """ColBERT late interaction attribution method using BGE-M3 multi-vectors."""
 
 import logging
-from typing import Dict, Any, List
+from dataclasses import dataclass
+from typing import Dict, Any, List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -11,6 +12,22 @@ from .sparse import _get_cached_bge_m3_model
 from .utils import normalize_score
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class WindowScoreResult:
+    """Result from window score computation.
+    
+    Attributes:
+        segment_scores: Tensor of shape [N_windows] with scores for each window
+        window_size: Actual window size used (may be clamped to doc length)
+        stride: Stride between windows
+        n_windows: Number of windows computed
+    """
+    segment_scores: torch.Tensor
+    window_size: int
+    stride: int
+    n_windows: int
 
 
 class ColBERTAttribution(AttributionMethod):
@@ -137,6 +154,193 @@ class ColBERTAttribution(AttributionMethod):
         )
         return output['colbert_vecs']
 
+    def _compute_interaction_matrix(
+        self,
+        query_vecs: torch.Tensor,
+        doc_vecs: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute the cosine similarity interaction matrix between query and doc vectors.
+
+        This normalizes both sets of vectors and computes the dot product matrix,
+        resulting in cosine similarities between all query-doc token pairs.
+
+        Args:
+            query_vecs: Query token embeddings, shape [N_q, D]
+            doc_vecs: Document token embeddings, shape [N_d, D]
+
+        Returns:
+            Interaction matrix of shape [N_q, N_d] where entry [i, j] is the
+            cosine similarity between query token i and document token j.
+        """
+        # Normalize vectors for cosine similarity
+        query_normed = F.normalize(query_vecs.float(), p=2, dim=-1)
+        doc_normed = F.normalize(doc_vecs.float(), p=2, dim=-1)
+
+        # Compute interaction matrix: [N_q, N_d]
+        sim_matrix = torch.matmul(query_normed, doc_normed.transpose(-2, -1))
+
+        return sim_matrix
+
+    def _compute_window_scores(
+        self,
+        sim_matrix: torch.Tensor,
+        doc_length: int
+    ) -> Optional[WindowScoreResult]:
+        """Compute scores for sliding windows over the document.
+
+        Uses 1D max pooling to find the best matching query token within each window,
+        then sums across all query tokens to get the final window score.
+
+        Args:
+            sim_matrix: Interaction matrix of shape [N_q, N_d]
+            doc_length: Number of document tokens (N_d)
+
+        Returns:
+            WindowScoreResult containing segment scores and window parameters,
+            or None if the document is too short for windowing.
+        """
+        # Clamp window size to doc length
+        window_size = min(self.window_size, doc_length)
+        stride = max(1, self.window_size - self.window_overlap)
+
+        if window_size < 1:
+            return None
+
+        # Add batch dimension for pooling: [1, N_q, N_d]
+        sim_batched = sim_matrix.unsqueeze(0)
+
+        # max_pool1d operates on last dimension
+        # Input: [1, N_q, N_d], treats N_q as channels
+        # Output: [1, N_q, N_windows]
+        window_max_scores = F.max_pool1d(
+            sim_batched,
+            kernel_size=window_size,
+            stride=stride
+        )
+
+        # Sum over query dimension to get window scores: [1, N_windows]
+        segment_scores = window_max_scores.sum(dim=1)
+
+        # Remove batch dimension: [N_windows]
+        segment_scores = segment_scores.squeeze(0)
+        n_windows = segment_scores.shape[0]
+
+        return WindowScoreResult(
+            segment_scores=segment_scores,
+            window_size=window_size,
+            stride=stride,
+            n_windows=n_windows
+        )
+
+    def _resolve_spans(
+        self,
+        text_b: str,
+        top_indices: torch.Tensor,
+        top_scores: torch.Tensor,
+        window_size: int,
+        stride: int,
+        n_doc_tokens: int
+    ) -> Tuple[List[AttributionSpan], List[int], List[tuple], List[int]]:
+        """Map window indices to character-level AttributionSpan objects.
+
+        Handles tokenization alignment, special token filtering, and character
+        position mapping.
+
+        Args:
+            text_b: Target text (document)
+            top_indices: Tensor of top-k window indices
+            top_scores: Tensor of top-k window scores
+            window_size: Size of each window in tokens
+            stride: Stride between windows
+            n_doc_tokens: Total number of document tokens from ColBERT encoding
+
+        Returns:
+            Tuple of (spans, input_ids, offsets, special_mask) where:
+            - spans: List of AttributionSpan objects
+            - input_ids: Token IDs for text_b
+            - offsets: Character offset tuples for each token
+            - special_mask: Binary mask (1 for special tokens)
+        """
+        # Tokenize text_b with same config as model.encode() for alignment
+        encoding_b = self.tokenizer(
+            text_b,
+            return_offsets_mapping=True,
+            add_special_tokens=True,
+            truncation=True,
+            max_length=self.passage_max_length
+        )
+        input_ids_b = encoding_b["input_ids"]
+        offsets_b = encoding_b["offset_mapping"]
+
+        # Build special token mask
+        special_ids = set(self.tokenizer.all_special_ids)
+        special_mask_b = [1 if tid in special_ids else 0 for tid in input_ids_b]
+
+        # Align lengths: model.encode may drop padding/SEP, take min
+        min_len = min(n_doc_tokens, len(input_ids_b))
+        offsets_b = offsets_b[:min_len]
+        special_mask_b = special_mask_b[:min_len]
+
+        if min_len == 0:
+            return [], input_ids_b, offsets_b, special_mask_b
+
+        # Build spans
+        spans = []
+        k = len(top_scores)
+        max_score = top_scores[0].item() if k > 0 else 1.0
+
+        for rank, (score, window_idx) in enumerate(
+            zip(top_scores.tolist(), top_indices.tolist())
+        ):
+            # Calculate token range for this window
+            token_start = window_idx * stride
+            token_end = min(token_start + window_size, min_len)
+
+            # Get character positions, skipping leading special tokens
+            if token_start >= min_len:
+                continue
+
+            # Skip leading special tokens in window
+            valid_start = token_start
+            while valid_start < token_end and special_mask_b[valid_start] == 1:
+                valid_start += 1
+            if valid_start >= token_end:
+                continue  # Window is all special tokens
+
+            # Skip trailing special tokens in window
+            valid_end = token_end - 1
+            while valid_end > valid_start and special_mask_b[valid_end] == 1:
+                valid_end -= 1
+
+            char_start = offsets_b[valid_start][0]
+            char_end = offsets_b[valid_end][1]
+
+            if char_start >= char_end:
+                continue
+
+            # Extract span text
+            span_text = text_b[char_start:char_end]
+
+            # Normalize score
+            normalized = normalize_score(score, max_score)
+
+            span = AttributionSpan(
+                text=span_text,
+                start_idx=char_start,
+                end_idx=char_end,
+                score=normalized,
+                metadata={
+                    "raw_score": score,
+                    "window_idx": window_idx,
+                    "token_start": token_start,
+                    "token_end": token_end,
+                    "window_rank": rank + 1,
+                }
+            )
+            spans.append(span)
+
+        return spans, input_ids_b[:min_len], offsets_b, special_mask_b
+
     def extract(self, text_a: str, text_b: str) -> AttributionResult:
         """Extract attribution spans from text_b based on similarity to text_a.
 
@@ -172,146 +376,50 @@ class ColBERTAttribution(AttributionMethod):
             if not isinstance(doc_vecs, torch.Tensor):
                 doc_vecs = torch.tensor(doc_vecs)
 
-            # Ensure float32 for computation
-            query_vecs = query_vecs.float()
-            doc_vecs = doc_vecs.float()
-
             n_q, dim = query_vecs.shape
             n_d, _ = doc_vecs.shape
 
             logger.debug(f"Query vectors: {n_q} tokens, Doc vectors: {n_d} tokens, dim={dim}")
 
-            # Step 2: Normalize vectors for cosine similarity
-            query_vecs = F.normalize(query_vecs, p=2, dim=-1)
-            doc_vecs = F.normalize(doc_vecs, p=2, dim=-1)
+            # Step 2: Compute interaction matrix (includes normalization)
+            sim_matrix = self._compute_interaction_matrix(query_vecs, doc_vecs)
 
-            # Step 3: Compute interaction matrix: [N_q, N_d]
-            # sim_matrix[i, j] = cosine similarity between query token i and doc token j
-            sim_matrix = torch.matmul(query_vecs, doc_vecs.transpose(-2, -1))
+            # Step 3: Compute window scores
+            window_result = self._compute_window_scores(sim_matrix, n_d)
 
-            # Add batch dimension for pooling: [1, N_q, N_d]
-            sim_matrix = sim_matrix.unsqueeze(0)
-
-            # Step 4: Apply max pooling to find best match within each window
-            # For each query token, find max similarity in each sliding window
-            window_size = min(self.window_size, n_d)  # Clamp to doc length
-            stride = max(1, self.window_size - self.window_overlap)
-
-            if window_size < 1:
+            if window_result is None:
                 logger.warning("Document too short for windowing")
                 return self._empty_result(text_a, text_b)
 
-            # max_pool1d operates on last dimension
-            # Input: [1, N_q, N_d], treats N_q as channels
-            # Output: [1, N_q, N_windows]
-            window_max_scores = F.max_pool1d(
-                sim_matrix,
-                kernel_size=window_size,
-                stride=stride
-            )
+            logger.debug(f"Computed {window_result.n_windows} window scores")
 
-            # Step 5: Sum over query dimension to get window scores
-            # segment_scores: [1, N_windows]
-            segment_scores = window_max_scores.sum(dim=1)
+            # Step 4: Find top-k windows
+            k = min(self.top_k_spans, window_result.n_windows)
+            top_scores, top_indices = torch.topk(window_result.segment_scores, k)
 
-            # Remove batch dimension: [N_windows]
-            segment_scores = segment_scores.squeeze(0)
-            n_windows = segment_scores.shape[0]
-
-            logger.debug(f"Computed {n_windows} window scores")
-
-            # Step 6: Find top-k windows
-            k = min(self.top_k_spans, n_windows)
-            top_scores, top_indices = torch.topk(segment_scores, k)
-
-            # Step 7: Map window indices to character positions
-            # Tokenize text_b with same config as model.encode() for alignment
-            encoding_b = self.tokenizer(
+            # Step 5: Resolve spans (map window indices to character positions)
+            spans, input_ids_b, offsets_b, special_mask_b = self._resolve_spans(
                 text_b,
-                return_offsets_mapping=True,
-                add_special_tokens=True,
-                truncation=True,
-                max_length=self.passage_max_length
+                top_indices,
+                top_scores,
+                window_result.window_size,
+                window_result.stride,
+                n_d
             )
-            input_ids_b = encoding_b["input_ids"]
-            offsets_b = encoding_b["offset_mapping"]
-            
-            # Build special token mask
-            special_ids = set(self.tokenizer.all_special_ids)
-            special_mask_b = [1 if tid in special_ids else 0 for tid in input_ids_b]
-            
-            # Align lengths: model.encode may drop padding/SEP, take min
-            min_len = min(n_d, len(input_ids_b))
-            offsets_b = offsets_b[:min_len]
-            special_mask_b = special_mask_b[:min_len]
 
-            if min_len == 0:
+            if not input_ids_b:
                 logger.warning("No tokens found in text_b")
                 return self._empty_result(text_a, text_b)
 
-            # Build spans
-            spans = []
-            max_score = top_scores[0].item() if k > 0 else 1.0
-
-            for rank, (score, window_idx) in enumerate(
-                zip(top_scores.tolist(), top_indices.tolist())
-            ):
-                # Calculate token range for this window
-                token_start = window_idx * stride
-                token_end = min(token_start + window_size, min_len)
-
-                # Get character positions, skipping leading special tokens
-                if token_start >= min_len:
-                    continue
-
-                # Skip leading special tokens in window
-                valid_start = token_start
-                while valid_start < token_end and special_mask_b[valid_start] == 1:
-                    valid_start += 1
-                if valid_start >= token_end:
-                    continue  # Window is all special tokens
-                
-                # Skip trailing special tokens in window
-                valid_end = token_end - 1
-                while valid_end > valid_start and special_mask_b[valid_end] == 1:
-                    valid_end -= 1
-
-                char_start = offsets_b[valid_start][0]
-                char_end = offsets_b[valid_end][1]
-                
-                if char_start >= char_end:
-                    continue
-
-                # Extract span text
-                span_text = text_b[char_start:char_end]
-
-                # Normalize score
-                normalized = normalize_score(score, max_score)
-
-                span = AttributionSpan(
-                    text=span_text,
-                    start_idx=char_start,
-                    end_idx=char_end,
-                    score=normalized,
-                    metadata={
-                        "raw_score": score,
-                        "window_idx": window_idx,
-                        "token_start": token_start,
-                        "token_end": token_end,
-                        "window_rank": rank + 1,
-                    }
-                )
-                spans.append(span)
-
-            # Step 8: Compute overall MaxSim score for metadata
+            # Step 6: Compute overall MaxSim score for metadata
             # Standard ColBERT score: mean of max similarities per query token
-            max_sims_per_query = sim_matrix.squeeze(0).max(dim=-1).values  # [N_q]
+            max_sims_per_query = sim_matrix.max(dim=-1).values  # [N_q]
             colbert_score = max_sims_per_query.mean().item()
 
-            # Step 9: Extract topic keywords (global summary-style tokens)
+            # Step 7: Extract topic keywords (global summary-style tokens)
             topic_keywords = self._extract_topic_keywords(
-                sim_matrix.squeeze(0),
-                input_ids_b[:min_len],
+                sim_matrix,
+                input_ids_b,
                 offsets_b,
                 special_mask_b,
                 text_b,
@@ -328,10 +436,10 @@ class ColBERTAttribution(AttributionMethod):
                     "colbert_score": colbert_score,
                     "num_query_tokens": n_q,
                     "num_doc_tokens": n_d,
-                    "window_size": window_size,
+                    "window_size": window_result.window_size,
                     "window_overlap": self.window_overlap,
-                    "stride": stride,
-                    "total_windows": n_windows,
+                    "stride": window_result.stride,
+                    "total_windows": window_result.n_windows,
                     "topic_keywords": topic_keywords,
                 }
             )
@@ -527,9 +635,7 @@ class ColBERTAttribution(AttributionMethod):
         if not isinstance(doc_vecs, torch.Tensor):
             doc_vecs = torch.tensor(doc_vecs)
 
-        query_vecs = F.normalize(query_vecs.float(), p=2, dim=-1)
-        doc_vecs = F.normalize(doc_vecs.float(), p=2, dim=-1)
-
-        sim_matrix = torch.matmul(query_vecs, doc_vecs.transpose(-2, -1))
+        # Reuse the interaction matrix computation
+        sim_matrix = self._compute_interaction_matrix(query_vecs, doc_vecs)
         max_sims = sim_matrix.max(dim=-1).values
         return max_sims.mean().item()

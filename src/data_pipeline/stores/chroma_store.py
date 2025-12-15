@@ -182,7 +182,7 @@ class ChromaStore(BaseStore):
         """
         try:
             collection = self.client.get_collection(name)
-            logger.info(f"Collection '{name}' retrieved (count={collection.count()})")
+            logger.info(f"Collection '{name}' retrieved")
             return collection
         except Exception:
             logger.warning(f"Collection '{name}' not found")
